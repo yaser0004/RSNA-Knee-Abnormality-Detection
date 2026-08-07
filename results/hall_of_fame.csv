@@ -1,0 +1,1 @@
+date,git_sha,config_hash,hypothesis,fold_set,seed,acl_auc,mcl_auc,medial_meniscus_auc,lateral_meniscus_auc,medial_oa_auc,lateral_oa_auc,pf_oa_auc,effusion_auc,synovitis_auc,bakers_auc,contusion_auc,fracture_auc,macro_auc,paired_delta,train_minutes,inference_seconds

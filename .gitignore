@@ -1,0 +1,22 @@
+# data
+data/
+
+# python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+
+# kaggle credentials — never committed
+kaggle.json
+
+# AI tooling artifacts
+.remember/
+.claude/
+.agy/
+
+# OS / editor
+.DS_Store
+*.swp

@@ -1,0 +1,12 @@
+pytest==9.0.3
+numpy==2.4.6
+pandas==3.0.2
+scikit-learn==1.8.0
+pydicom==3.0.2
+pylibjpeg==2.1.0
+pylibjpeg-libjpeg==2.4.0
+pylibjpeg-openjpeg==2.5.0
+torch==2.12.1
+timm==1.0.28
+langdetect==1.0.9
+kaggle==2.2.4
