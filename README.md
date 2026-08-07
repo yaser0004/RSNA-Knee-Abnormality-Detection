@@ -10,11 +10,15 @@ running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as
 kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1
 (pipeline-validation baseline) infrastructure built and tested — DICOM series/slice selection,
 laterality resolution, pixel decode/normalize, a `torch.utils.data.Dataset` over raw DICOMs, a
-single-backbone mean-pool model, NaN-masked BCE loss, macro AUC, and a submission writer with a 0.5
-fallback, all covered by tests (46 passing). The full offline import → decode → inference →
-`submission.csv` round trip has been validated on real Kaggle infrastructure (internet off) — see
-`notebooks/knee-phase1-smoke-test.ipynb`. Not yet built: the actual training loop/CV harness
-(`train.py` currently only has the loss function), and Phase 2's `prep.py` preprocessing pipeline.**
+single-backbone mean-pool model, NaN-masked BCE loss, macro AUC, a submission writer with a 0.5
+fallback, and the training/CV building blocks (deterministic fold assignment, one training epoch,
+evaluation, experiment logging matching `results/experiments.csv`'s real header) — all covered by
+tests (54 passing). The full offline import → decode → inference → `submission.csv` round trip has
+been validated on real Kaggle infrastructure (internet off) — see
+`notebooks/knee-phase1-smoke-test.ipynb`. Not yet run: the actual Kaggle GPU training job that ties
+these pieces into a genuinely trained baseline (everything so far has been validated on tiny
+local/synthetic data, per the "local GPU is code-authoring and unit-tests only" constraint), and
+Phase 2's `prep.py` preprocessing pipeline.**
 
 Only 58 of 4,407 training studies carry gold rubric labels (verified directly, not the "a few
 hundred" first assumed) — this is effectively a weak-supervision competition, not a conventional
@@ -38,7 +42,8 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
                       will read prepped artifacts once prep.py exists
   model.py           [done, Phase 1 shape] single backbone + mean-pool over slices;
                       slice/series attention is a later Phase 5 upgrade
-  train.py           [loss function done] masked BCE; the fold/CV/checkpointing loop is next
+  train.py           [building blocks done] masked BCE, fold assignment, one epoch, evaluate,
+                      experiment logging; not yet run as a real Kaggle GPU training job
   infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback
   reports.py         [done, EN/ES only] lexical label rules; LLM calibration is Phase 3
   metrics.py         [done] macro AUC, per-label AUC (NaN-safe); bootstrap CI not yet added

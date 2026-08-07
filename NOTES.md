@@ -162,3 +162,15 @@ stays the stable strategy reference; this is the fast-moving log of what was act
   before the label loop, consistent with how every other "no evidence" case in this codebase is
   handled (NaN, not a crash). All three now covered by tests using the real `KneeStudyDataset` /
   `build_submission` composition, not just isolated unit calls.
+- `train.py` training/CV building blocks done (54 tests total): `make_folds` (sorts before
+  shuffling so the assignment never depends on input order -- important since the plan requires
+  the fold assignment frozen across every experiment), `log_experiment` (reads the target CSV's own
+  header to build row order, so it can never silently drift out of sync with
+  `results/experiments.csv`'s actual columns), `train_one_epoch` (skips a batch if
+  `masked_bce_loss` raises on an all-NaN batch rather than crashing the epoch -- possible with a
+  small batch size and a low-coverage label like Medial Meniscus), `evaluate` (returns full
+  `[n, 12]` y_true/y_pred arrays with NaN preserved, for `knee.metrics.per_label_auc` to mask).
+  Not yet built: the actual Kaggle GPU training run that ties these together into the real Phase 1
+  baseline (lexical labels from all 4,407 reports, k-fold across them, a genuinely trained
+  checkpoint) -- everything so far has been validated on tiny local/synthetic data only, per the
+  "local GPU is code-authoring and unit-tests only" constraint.
