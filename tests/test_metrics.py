@@ -46,3 +46,30 @@ def test_macro_auc_excludes_undefined_labels_from_the_average():
     actual = macro_auc(y_true, y_pred)
 
     assert actual == pytest.approx(expected)
+
+
+def test_handles_nan_targets_from_unmatched_lexical_labels():
+    # lexical_label returns None for studies with no rule match, which becomes
+    # NaN once collected into a float array -- must not raise, and must score
+    # only the rows that actually have a target for that label.
+    nan = np.nan
+    y_true = np.array([[1.0], [0.0], [nan], [1.0], [nan], [0.0]])
+    y_pred = np.array([[0.9], [0.2], [0.5], [0.8], [0.5], [0.4]])
+
+    labeled_mask = ~np.isnan(y_true[:, 0])
+    expected = roc_auc_score(y_true[labeled_mask, 0], y_pred[labeled_mask, 0])
+
+    labels = per_label_auc(y_true, y_pred)
+
+    assert labels[0] == pytest.approx(expected)
+
+
+def test_macro_auc_handles_all_nan_column():
+    nan = np.nan
+    y_true = np.array([[1.0, nan], [0.0, nan], [1.0, nan]])
+    y_pred = np.array([[0.9, 0.5], [0.2, 0.5], [0.8, 0.5]])
+
+    expected = roc_auc_score(y_true[:, 0], y_pred[:, 0])
+    actual = macro_auc(y_true, y_pred)
+
+    assert actual == pytest.approx(expected)

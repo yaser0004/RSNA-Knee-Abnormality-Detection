@@ -1,5 +1,10 @@
 import re
 
+import numpy as np
+import pandas as pd
+
+from knee.infer import LABEL_COLUMNS
+
 # Phase 1 baseline: multilingual keyword/regex rules over report text (Tier 3 in
 # the plan's Label hierarchy). Only English and Spanish patterns are seeded here
 # with confidence. The real report-language distribution (measured on a 500-report
@@ -42,3 +47,26 @@ def lexical_label(report_text: str, label: str) -> int | None:
             return 1
 
     return None
+
+
+def build_lexical_labels(reports_df: pd.DataFrame) -> pd.DataFrame:
+    """Apply lexical_label across all 12 label columns for every study. Labels
+    with no rule defined (e.g. Synovitis) are NaN for every row, same as an
+    unmatched rule -- both mean "no evidence", never "negative"."""
+    rows = []
+    for _, row in reports_df.iterrows():
+        report = row["Report"]
+        if not isinstance(report, str):
+            # missing/NaN report -- no evidence for any label, not a crash
+            rows.append([row["StudyInstanceUID"], *([np.nan] * len(LABEL_COLUMNS))])
+            continue
+        label_values = []
+        for label in LABEL_COLUMNS:
+            try:
+                value = lexical_label(report, label)
+            except ValueError:
+                value = None
+            label_values.append(np.nan if value is None else float(value))
+        rows.append([row["StudyInstanceUID"], *label_values])
+
+    return pd.DataFrame(rows, columns=["StudyInstanceUID"] + LABEL_COLUMNS)

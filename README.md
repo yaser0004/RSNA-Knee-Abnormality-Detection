@@ -7,11 +7,14 @@ scored by macro-averaged ROC AUC. Targets both the main leaderboard and the Effi
 
 Full strategy lives in the plan document (not tracked in this repo); empirical findings from actually
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
-kept separate from the plan so the plan stays a stable strategy reference. Status: **data
-infrastructure under test — `dicom.py` (series/slice selection, laterality resolution),
-`metrics.py` (macro AUC), `infer.py` (submission writer with 0.5 fallback), and `reports.py`
-(lexical label rules for English/Spanish) are implemented and covered by tests. No model or training
-code yet.**
+kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1
+(pipeline-validation baseline) infrastructure built and tested — DICOM series/slice selection,
+laterality resolution, pixel decode/normalize, a `torch.utils.data.Dataset` over raw DICOMs, a
+single-backbone mean-pool model, NaN-masked BCE loss, macro AUC, and a submission writer with a 0.5
+fallback, all covered by tests (46 passing). The full offline import → decode → inference →
+`submission.csv` round trip has been validated on real Kaggle infrastructure (internet off) — see
+`notebooks/knee-phase1-smoke-test.ipynb`. Not yet built: the actual training loop/CV harness
+(`train.py` currently only has the loss function), and Phase 2's `prep.py` preprocessing pipeline.**
 
 Only 58 of 4,407 training studies carry gold rubric labels (verified directly, not the "a few
 hundred" first assumed) — this is effectively a weak-supervision competition, not a conventional
@@ -25,19 +28,24 @@ sample of studies pulled via the Kaggle API), never full training.
 
 ## Layout
 
+Target layout (full plan); items marked `[done]` exist today, everything else is Phase 2+:
+
 ```
 src/knee/            package pushed to Kaggle as a private dataset, imported by thin notebooks
-  dicom.py           header scan, series/slice selection, decode, normalize
-  prep.py            study -> compact volume artifact (writer)
-  dataset.py         torch Dataset over prepped artifacts
-  model.py           backbone + slice attention + series attention + 12 heads
-  train.py           folds, loss, AMP, checkpointing
-  infer.py           single entry point used by both submission notebooks
-  reports.py         LLM prompting, JSON parse, calibration to soft targets
-  metrics.py         macro AUC, per-label AUC, bootstrap CI
+  dicom.py           [done] header scan, series/slice selection, laterality, decode/normalize
+  prep.py            study -> compact volume artifact (writer) -- Phase 2, not started
+  dataset.py         [done, Phase 1 shape] torch Dataset directly over raw DICOMs;
+                      will read prepped artifacts once prep.py exists
+  model.py           [done, Phase 1 shape] single backbone + mean-pool over slices;
+                      slice/series attention is a later Phase 5 upgrade
+  train.py           [loss function done] masked BCE; the fold/CV/checkpointing loop is next
+  infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback
+  reports.py         [done, EN/ES only] lexical label rules; LLM calibration is Phase 3
+  metrics.py         [done] macro AUC, per-label AUC (NaN-safe); bootstrap CI not yet added
 notebooks/           thin Kaggle notebooks: import knee, call one function
+  knee-phase1-smoke-test.ipynb  validated end-to-end round trip on real Kaggle infra (internet off)
 tests/               pytest, runs locally on a small sample, no GPU needed
-data/sample/         ~20 studies pulled via Kaggle API for local dev (gitignored)
+data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 results/             experiment tracking, see below
 ```
 

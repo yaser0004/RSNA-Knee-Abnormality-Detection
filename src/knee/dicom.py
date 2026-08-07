@@ -2,6 +2,8 @@ import re
 
 import numpy as np
 import pandas as pd
+import pydicom
+from PIL import Image
 
 # Priority order established in the plan's Phase 2 spec: sagittal-fluid-sensitive,
 # coronal-fluid-sensitive, axial-fluid-sensitive, sagittal-non-fluid.
@@ -106,3 +108,27 @@ def resolve_laterality(header: dict) -> tuple[str | None, str]:
             return "L", field
 
     return None, "unknown"
+
+
+def decode_and_normalize(dcm_path: str, size: int = 224) -> np.ndarray:
+    """Read a single DICOM slice's pixels, robust-normalize (1st/99th
+    percentile clip) to uint8, and resize. Clips per-slice rather than
+    per-series -- per-series clipping needs every slice of the series loaded
+    together, which this single-file entry point doesn't have; prep.py should
+    upgrade to a true per-series clip once it operates on a whole series."""
+    ds = pydicom.dcmread(dcm_path)
+    arr = ds.pixel_array.astype(np.float32)
+
+    slope = float(getattr(ds, "RescaleSlope", 1))
+    intercept = float(getattr(ds, "RescaleIntercept", 0))
+    arr = arr * slope + intercept
+
+    lo, hi = np.percentile(arr, [1, 99])
+    if hi > lo:
+        arr = np.clip((arr - lo) / (hi - lo), 0, 1)
+    else:
+        arr = np.zeros_like(arr)
+    arr_uint8 = (arr * 255).astype(np.uint8)
+
+    image = Image.fromarray(arr_uint8).resize((size, size), Image.BILINEAR)
+    return np.array(image)

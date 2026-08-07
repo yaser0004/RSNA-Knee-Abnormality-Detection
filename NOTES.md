@@ -90,9 +90,75 @@ stays the stable strategy reference; this is the fast-moving log of what was act
   one bit of information between them in this dataset, not two independent signals — likely the
   "column that is lying to you" flagged by `stevenleehans/rsna-knee-101`. Relevant to the model's
   series-descriptor conditioning (Architecture section) — no need to concat both as if independent.
-- First real check of the Phase 1 lexical rule (`knee.reports.lexical_label`) against the 58 gold
-  Effusion labels: matched (non-None) on 36/58 studies (62% coverage), agreed with gold on 24/36 of
-  those (66.7%). Rough but a real, non-trivial signal for a first-pass English/Spanish-only keyword
-  rule — in line with the plan's expectation that Tier 3 lexical rules are cruder than Tier 2
-  calibrated LLM output. Only Effusion checked so far; other labels (ACL, Baker's, medial meniscus)
-  still need the same check once real report text for those cases is spot-checked.
+- Lexical rule (`knee.reports.lexical_label`, English/Spanish only) checked against all 58 gold
+  studies, per label — coverage (non-None match rate) and agreement (accuracy on the matched subset):
+  - Effusion: 62% coverage, 66.7% agreement (36 matched)
+  - Baker's: 19% coverage, 81.8% agreement (11 matched)
+  - ACL: 12% coverage, 85.7% agreement (7 matched)
+  - Medial Meniscus: 16% coverage, **55.6% agreement (9 matched) — barely above chance, n too small
+    to trust either way, and the pattern itself may be too loose (currently requires "tear/torn/
+    rupture" within 40 chars of "medial meniscus", which real report phrasing may not satisfy)**
+  Coverage is low everywhere (12-62%) since these are English/Spanish-only patterns over a corpus
+  that's only 56% English+Spanish — expected, per the plan's Phase 1 framing this is a pipeline
+  validation baseline, not a coverage-complete labeling system. ACL and Baker's have decent agreement
+  where they do match; Medial Meniscus needs its pattern revisited before being trusted in training,
+  or should train on a small enough loss weight that a coin-flip-level signal can't hurt much.
+- Phase 1's single-series pick (`select_series(..., max_series=1)` → only tries Sagittal +
+  Fluid_Sensitive) covers **94.2% of studies (4,150/4,407)** with an exact match; the rest fall
+  through to the top-up branch and get an arbitrary series. Close enough to ignore for a pipeline-
+  validation baseline — 100% of studies have *some* Sagittal series, just not always fluid-sensitive.
+- Caught two real bugs via advisor review before they'd have silently broken training: (1)
+  `per_label_auc` crashed on NaN targets (`np.unique` doesn't treat NaN as "one class", so the
+  single-class guard let NaN through to `roc_auc_score`, which raises) — lexical labels produce NaN
+  for every unmatched study, so this would have broken on the very first real run. Fixed by masking
+  NaN rows out per-column before scoring. (2) `masked_bce_loss` didn't exist yet — an unmasked BCE
+  loss on NaN targets produces NaN loss/grads with no exception, silently killing the model. Both
+  are covered by tests now (`test_metrics.py`, `test_train.py`) using real NaN-shaped data, not just
+  clean synthetic data — a reminder that "all green" tests only prove what they actually exercise.
+- Corrected the `select_series` fallback: the original implementation only topped up toward
+  `max_series` when *zero* priority slots matched — a study with 1 matched + 3 unmatched slots got
+  only 1 series back even with room for more. Now tops up whenever `len(selected) < max_series`.
+- **Kaggle's dataset zip upload auto-extracts and flattens.** `kaggle datasets create -p . -r zip`
+  on a folder containing a `knee/` subfolder does not preserve `knee/` as a folder in the resulting
+  dataset — the `.py` files land at the dataset root. Any package uploaded this way needs to be
+  reconstructed into a real package folder inside the notebook before `import knee.x` will work
+  (copy the flat files into `/kaggle/working/knee/` and add `/kaggle/working` to `sys.path`).
+- **The actual `/kaggle/input` layout on this account is namespaced, not the classic flat
+  `/kaggle/input/<slug>/` documented in most older Kaggle tutorials/notebooks.** Real structure
+  observed: `/kaggle/input/datasets/<owner>/<dataset-slug>/...` and
+  `/kaggle/input/competitions/<competition-slug>/...`. A notebook written against the flat-path
+  assumption fails immediately with `FileNotFoundError`. Fix: glob for the target folder name under
+  `/kaggle/input/**` rather than hardcoding the classic path — this is what
+  `notebooks/knee-phase1-smoke-test.ipynb` does now. Worth rechecking whether this is
+  account/environment-specific or a genuine platform-wide change before assuming it's universal.
+- **Full offline round-trip validated on real Kaggle infrastructure (2026-08-08), 3rd kernel push:**
+  private dataset (`rsna-knee-src`) + competition data attached, `enable_internet: false`,
+  `enable_gpu: false`. Package import, DICOM decode, model forward pass (untrained, random-init
+  efficientnet_b0), and `submission.csv` writing all worked end to end against the real 3-study test
+  set. Submission header, shape, and value range all correct (verified by eye in the kernel output).
+  **Real single-threaded CPU-only decode+forward timing: 1.4s/study → 30.3 min extrapolated to 1,300
+  studies.** This is with sequential decode (no multiprocessing across vCPUs) and no GPU — the
+  Phase 6 efficiency submission (parallel decode, fp16, GPU) should land well inside the 10-25 min
+  sweet spot; this number is the unoptimized upper bound, not the target. This also finally answers
+  the JPEG-transfer-syntax question locally unresolved after 60 sampled files: the real Kaggle test
+  set apparently decoded without incident at this speed, though the log didn't break down time by
+  transfer syntax — worth adding that breakdown before trusting the number precisely.
+  Kernel saved at `notebooks/knee-phase1-smoke-test.ipynb` + `kernel-metadata.json`. **This was a
+  smoke test only (untrained model, 8/12 labels clamped to 0.5) — it validates the pipeline, it is
+  not the official Phase 1 baseline submission.** The real Phase 1 gate (a scored public-LB entry
+  from an actually-trained model) still needs a training run.
+- `/code-review` on the working tree found 3 real bugs, 2 confirmed by direct repro: (1)
+  `KneeStudyDataset.__getitem__` crashed with a bare `IndexError` on `slices[-1]` if a series
+  directory had zero `.dcm` files (e.g. a partial download) — the padding loop indexed an empty
+  list. (2) Same method crashed with `IndexError` from `select_series(...)[0]` if a study had no
+  rows in `series_df` at all. Both fixed by consolidating series/slice resolution into one
+  `_load_image` helper that raises a new named `StudyDecodeError` instead — this doesn't change
+  `build_submission`'s existing safety net (it already caught bare `Exception`, so `IndexError` was
+  being handled at the inference/submission layer already) but gives training code a specific,
+  catchable exception to skip a bad study by instead of crashing the whole DataLoader worker.
+  (3) `build_lexical_labels` only caught `ValueError` from `lexical_label`, not the `TypeError` a
+  NaN `Report` value would raise from `re.search`. Not observed in the real data (0/4407 rows have
+  a NaN `Report` today) but no guard existed — fixed with an `isinstance(report, str)` check per row
+  before the label loop, consistent with how every other "no evidence" case in this codebase is
+  handled (NaN, not a crash). All three now covered by tests using the real `KneeStudyDataset` /
+  `build_submission` composition, not just isolated unit calls.
