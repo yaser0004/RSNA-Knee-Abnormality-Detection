@@ -1,0 +1,16 @@
+{
+  "id": "mohammadyaserhussain/knee-phase1-train",
+  "title": "knee-phase1-train",
+  "code_file": "knee-phase1-train.ipynb",
+  "language": "python",
+  "kernel_type": "notebook",
+  "is_private": "true",
+  "enable_gpu": "true",
+  "enable_tpu": "false",
+  "enable_internet": "true",
+  "machine_shape": "",
+  "dataset_sources": ["mohammadyaserhussain/rsna-knee-src"],
+  "competition_sources": ["rsna-knee-abnormality-detection"],
+  "kernel_sources": [],
+  "model_sources": []
+}

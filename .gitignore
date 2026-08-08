@@ -1,6 +1,13 @@
 # data
 data/
 
+# trained model checkpoints and prediction arrays -- large binaries,
+# reproducible from the Kaggle training notebooks, not tracked in git
+checkpoints/
+
+# personal reference screenshots, not project documentation
+RESOURCES/
+
 # python
 __pycache__/
 *.pyc

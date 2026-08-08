@@ -7,18 +7,21 @@ scored by macro-averaged ROC AUC. Targets both the main leaderboard and the Effi
 
 Full strategy lives in the plan document (not tracked in this repo); empirical findings from actually
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
-kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1
-(pipeline-validation baseline) infrastructure built and tested — DICOM series/slice selection,
-laterality resolution, pixel decode/normalize, a `torch.utils.data.Dataset` over raw DICOMs, a
-single-backbone mean-pool model, NaN-masked BCE loss, macro AUC, a submission writer with a 0.5
-fallback, and the training/CV building blocks (deterministic fold assignment, one training epoch,
-evaluation, experiment logging matching `results/experiments.csv`'s real header) — all covered by
-tests (54 passing). The full offline import → decode → inference → `submission.csv` round trip has
-been validated on real Kaggle infrastructure (internet off) — see
-`notebooks/knee-phase1-smoke-test.ipynb`. Not yet run: the actual Kaggle GPU training job that ties
-these pieces into a genuinely trained baseline (everything so far has been validated on tiny
-local/synthetic data, per the "local GPU is code-authoring and unit-tests only" constraint), and
-Phase 2's `prep.py` preprocessing pipeline.**
+kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1 baseline
+complete — trained, submitted, and scored on the real leaderboard.** `efficientnet_b0`, single
+sagittal fluid-sensitive series, 16 slices, trained on lexical (keyword-derived) labels for the 4
+labels with any coverage (ACL, Medial Meniscus, Effusion, Baker's — the other 8 have no lexical rule
+yet). 5-fold CV, pooled OOF macro AUC 0.7985 on those 4 labels; real competition leaderboard score
+**0.558** (the other 8 labels score ~0.5 each since they were never trained, diluting the 12-label
+macro average — see `NOTES.md` for the full breakdown, including the ~0.674 real-world AUC backed out
+for the 4 trained labels vs. their 0.80 lexical-label validation average). Submission notebooks live
+in `notebooks/phase1-train/` (training) and `notebooks/phase1-submit/` (the actual scored submission).
+Core library (`src/knee/`) covered by tests (56 passing): DICOM series/slice selection, laterality
+resolution, pixel decode/normalize, dataset classes (including an in-memory decode cache), model,
+NaN-masked BCE loss, fold assignment, training/eval loops, experiment logging, macro AUC, and a
+submission writer with a 0.5 fallback. Not yet done: Phase 2's `prep.py` preprocessing pipeline and
+Phase 3's calibrated LLM labeling (the natural next step, given the measured lexical-label transfer
+gap).**
 
 Only 58 of 4,407 training studies carry gold rubric labels (verified directly, not the "a few
 hundred" first assumed) — this is effectively a weak-supervision competition, not a conventional
@@ -42,15 +45,18 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
                       will read prepped artifacts once prep.py exists
   model.py           [done, Phase 1 shape] single backbone + mean-pool over slices;
                       slice/series attention is a later Phase 5 upgrade
-  train.py           [building blocks done] masked BCE, fold assignment, one epoch, evaluate,
-                      experiment logging; not yet run as a real Kaggle GPU training job
+  train.py           [done] masked BCE, fold assignment, one epoch, evaluate, experiment logging --
+                      used for the real Phase 1 5-fold training run (notebooks/phase1-train/)
   infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback
   reports.py         [done, EN/ES only] lexical label rules; LLM calibration is Phase 3
   metrics.py         [done] macro AUC, per-label AUC (NaN-safe); bootstrap CI not yet added
 notebooks/           thin Kaggle notebooks: import knee, call one function
   knee-phase1-smoke-test.ipynb  validated end-to-end round trip on real Kaggle infra (internet off)
+  phase1-train/        real 5-fold training run -- lexical labels, efficientnet_b0, OOF macro AUC 0.7985
+  phase1-submit/        the actual scored submission notebook (offline, loads the trained checkpoint)
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
+checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
 results/             experiment tracking, see below
 ```
 

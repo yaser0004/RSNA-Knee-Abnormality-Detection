@@ -174,3 +174,119 @@ stays the stable strategy reference; this is the fast-moving log of what was act
   baseline (lexical labels from all 4,407 reports, k-fold across them, a genuinely trained
   checkpoint) -- everything so far has been validated on tiny local/synthetic data only, per the
   "local GPU is code-authoring and unit-tests only" constraint.
+- **First real Phase 1 training attempt on Kaggle, three separate failures before a clean run:**
+  (1) Kaggle assigned a **P100 GPU**, which is Pascal architecture (compute capability sm_60) --
+  the PyTorch build in Kaggle's current container image only supports sm_70+ (Turing and newer),
+  so the very first real CUDA kernel launch (a batch-norm op inside efficientnet_b0's stem) failed
+  with `AcceleratorError: no kernel image is available for execution on the device`. **Kaggle's
+  `kernel-metadata.json` has no field to request a specific GPU model** -- confirmed by pulling the
+  kernel's actual live metadata after a UI-based accelerator change; there's no `accelerator`/
+  `gpu_type` field, only `enable_gpu: true/false`. A T4 selected once in the interactive editor did
+  not carry over to a later `kaggle kernels push` -- that run landed back on P100. Fix: probe with
+  a real CUDA op (`torch.zeros(1, device='cuda') + 1`, not just allocation) before committing to
+  `cuda`, and fall back to `cpu` if it fails, rather than crash. (2) Interactive "Run All" in the
+  Kaggle notebook editor is **not reliable for a ~50+ minute job** -- the browser session
+  disconnected/reset multiple times, and the editor kept displaying the *last successful run's
+  cached cell output* even though the live kernel behind it had restarted and none of those
+  variables actually existed any more. This produced a confusing loop of identical-looking pasted
+  output followed by `NameError`s for different variables each time, since each attempt actually
+  died at a different, arbitrary point after reconnecting. Fix: use `kaggle kernels push` (or the
+  editor's "Save Version -> Save & Run All (Commit)") instead of interactive Run All -- these run
+  detached on Kaggle's infrastructure, independent of any browser session. (3) Once running on a
+  real (P100-forced-CPU-fallback) session, the kernel died with **no Python traceback at all**
+  (`Kernel died while waiting for execute reply`) immediately after printing `device: cpu` --
+  classic OOM-kill signature. Root cause: `CachedDataset` (as originally written in
+  `src/knee/dataset.py`) caches each study's **already-expanded float32, 3-channel tensor**
+  (16 slices * 3ch * 224 * 224 * 4 bytes ~= 9.2 MB/study). Across the 2,151 lexically-labeled
+  studies this notebook trains on, that's **~19.3 GB held in RAM simultaneously** -- almost
+  certainly the actual OOM trigger, on top of whatever the (CPU-fallback) training itself needed.
+  The 3 "channels" are identical copies (grayscale MRI repeated only to satisfy an
+  ImageNet-pretrained backbone's input shape) and the float32 upcast happens right after a uint8
+  decode -- neither is worth persisting per-study. Fix, implemented as a **notebook-local**
+  `CompactCachedDataset` (deliberately not a change to the tested library `CachedDataset`, to avoid
+  touching working code under time pressure): cache one uint8 channel per slice (~0.8 MB/study,
+  ~1.6 GB total, a 12x reduction), reconstruct the float32/3-channel form fresh on every read --
+  cheap to compute, expensive to store repeatedly. Verified locally before pushing: round-trip
+  reconstruction error is bounded by uint8 quantization (<=1/255) and the shape/dtype contract
+  KneeModel expects is preserved exactly. **This validates Phase 2's plan design retroactively** --
+  the plan's `prep.py` spec already called for storing prepped slices as uint8 (JPEG-encoded, even
+  more compact), not float32; Phase 1's in-memory shortcut hit exactly the problem that design was
+  built to avoid. Worth considering whether `src/knee/dataset.py`'s `CachedDataset` should get this
+  same fix for anyone else who reaches for it at this scale, rather than leaving the compact version
+  notebook-only.
+- **Phase 1 baseline completed end to end: trained, submitted, and scored on the real leaderboard.**
+  Full sequence of what actually happened, in order:
+  - After the OOM fix (previous note), the fixed notebook (kernel push v6) landed on **P100 again**
+    -- 3rd P100 out of 3 CLI-triggered pushes so far, 1-in-4 T4 hit rate overall including the one
+    interactive session that got T4. The CPU fallback worked this time (no OOM), but CPU training
+    of `efficientnet_b0` at this scale is genuinely slow: **~84 minutes per fold for 1 epoch**
+    (2151 studies, batch_size=8, ~1720 train studies/fold). At that pace the full 5-fold job would
+    have taken ~7.5 hours total. User stopped it after fold 0 finished via the web UI's Stop
+    button (there is no CLI command for this). Cancelling still allowed pulling output afterward
+    (`kaggle kernels output` works once status is `CANCEL_ACKNOWLEDGED`, not just `COMPLETE`/
+    `ERROR`) -- both `experiments.csv` (1 real row, fold 0) and the fold-0 checkpoint survived,
+    since disk writes made before a manual stop aren't lost the way in-memory state is.
+  - Retried by setting the accelerator to **T4 x2 in the interactive editor's settings**, then
+    triggering the run via **"Save Version -> Save & Run All (Commit)"** from that same editor
+    session (not a plain `kaggle kernels push`). This combination -- UI accelerator selection +
+    UI-triggered detached commit run -- is the one that actually worked reliably: landed on T4,
+    ran fully detached (survived fine), completed all 5 folds in ~2.4 min/fold (vs. ~84 min/fold
+    on CPU -- roughly a 35x speedup from the GPU alone). **This is the combination to use for every
+    future Kaggle GPU training job on this project** -- a plain CLI push has gone to P100 100% of
+    the time (3/3) so far, while UI-accelerator-pick + Save&RunAll has gone to T4 100% of the time
+    (2/2, counting the very first successful-but-lost interactive run). Small sample, but consistent.
+  - **Real Phase 1 baseline result: pooled OOF macro AUC = 0.7985** across all 5 folds (per-label:
+    ACL 0.695, Medial Meniscus 0.837, Effusion 0.867, Baker's 0.795; the other 8 labels NaN, no
+    lexical rule exists for them). Verified independently by loading the saved `oof_true.npy`/
+    `oof_pred.npy` through the project's own `knee.metrics.macro_auc` -- matched the notebook's
+    printed number exactly (0.79846...), a useful consistency check that the metrics code and the
+    notebook's copy of it (reconstructed from the same `rsna-knee-src` dataset) agree.
+  - Also confirmed empirically: **the single fold-0 result (0.86-ish, seen twice: once from the
+    CPU partial run, once as the first fold of the full T4 run) was not representative** -- fold 0
+    happens to be the easiest of the 5 splits (fold assignment is deterministic, same seed=0 every
+    run, so it's the same ~430 studies every time). Per-fold macro AUCs on the full T4 run: fold 0
+    0.8614, fold 1 0.8023, fold 2 0.7649, fold 3 0.8123, fold 4 0.8402 -- real spread, and the
+    pooled/OOF number (0.7985) sits below every fold except the worst one, which is expected: it's
+    not an average of the 5 fold numbers, it's computed by pooling all out-of-fold predictions and
+    scoring once, which is more sensitive to the harder studies. This is exactly why the plan
+    insists on full k-fold CV rather than trusting a single split.
+  - Results integration hiccup: appending the 5 real rows into `results/experiments.csv` via
+    `tail -n +2 ... >> results/experiments.csv` got run twice, duplicating all 5 rows (11 lines
+    instead of 6). Fixed with `head -n 6` to truncate back to header + 5 unique rows. Worth
+    double-checking row counts after any manual append, not just trusting the command ran once.
+  - `results/baseline.csv` deliberately NOT written until a real `public_lb` score existed --
+    that file is "write once, never changes" per the plan's experiment discipline, and writing it
+    with a blank `public_lb` field and coming back to fill it in later would violate that.
+  - **Built the real submission notebook** (`notebooks/phase1-submit/`, separate from the
+    smoke-test one): loads the trained fold-0 checkpoint via `torch.load(..., weights_only=True)`
+    (flagged by the security-guidance hook as good practice even for our own checkpoint -- default
+    `weights_only=False` unpickles arbitrary objects), runs offline inference (internet off, GPU
+    off -- inference doesn't need GPU per the earlier smoke-test finding, and going GPU-off
+    sidesteps the whole P100/T4 lottery for this one), clamps the 8 untrained label columns to 0.5
+    (their shared `nn.Linear` head rows never received a gradient during training since
+    `masked_bce_loss` excluded them from every batch -- they're still at random init, worse than
+    useless to expose), and asserts row count / no-NaN / [0,1]-range before writing `submission.csv`.
+    Checkpoint had to be uploaded as its own private Kaggle dataset (`rsna-knee-checkpoints`) since
+    a submission notebook can't reach out to load it live (internet off).
+  - **This is a Code Competition -- `kaggle competitions submit -f <file>` is rejected outright**
+    (`400 Bad Request`, no useful message from the CLI). Confirmed by trying it directly: a raw
+    local-file upload doesn't work here regardless of how the file was produced. The actual
+    mechanism is the web UI's **"Submit to Competition"** panel, reached from the notebook's
+    Output tab -- it links a specific notebook *version*'s *output file* to the competition, which
+    gets privately re-run against the real hidden test set (~1,300 studies, vs. the 3 visible in
+    the public example) to produce the score. Worth remembering for every future submission on
+    this project: build/verify the submission notebook, run it, then submit through that panel,
+    not the CLI.
+  - **Real leaderboard score: 0.558** (rank ~496 at submission time; leaderboard tightly packed
+    0.548-0.559 in that neighborhood, top 10 at 0.90-0.94). Backed out what this implies about the
+    4 trained labels' real-world performance: since the other 8 columns score exactly 0.5 (constant
+    prediction, zero ranking power), `0.558 = (4*X + 8*0.5)/12` gives `X ≈ 0.674` -- the true
+    average AUC of the 4 lexically-trained labels against the real doctor-graded rubric, down from
+    their ~0.80 average against the lexical-label OOF validation. **That ~0.13 absolute gap is the
+    first real, quantified measurement of how much accuracy is lost between "keyword-matched proxy
+    label" and "actual gold-standard rubric label"** -- exactly the risk the plan flagged as its
+    central assumption from the start, now measured for real rather than assumed. It's a genuine
+    data point for deciding how much Phase 3's calibrated-LLM labeling is worth building: even a
+    fairly crude proxy label transferred *some* real signal (0.674 >> 0.5), which is the core
+    justification for the whole weak-supervision strategy, but the gap also shows plenty of room
+    for a better label source to close.

@@ -91,3 +91,22 @@ class KneeStudyDataset(Dataset):
         if row.empty:
             return torch.full((len(LABEL_COLUMNS),), float("nan"))
         return torch.tensor(row[LABEL_COLUMNS].to_numpy()[0], dtype=torch.float32)
+
+
+class CachedDataset(Dataset):
+    """Wraps another dataset, decoding each item at most once and reusing the
+    result on every later access. DICOM decode dominates runtime far more
+    than a model forward/backward pass, so re-decoding every epoch would make
+    multi-epoch training needlessly slow -- decode once, train many times."""
+
+    def __init__(self, base_dataset):
+        self.base = base_dataset
+        self._cache: dict[int, object] = {}
+
+    def __len__(self) -> int:
+        return len(self.base)
+
+    def __getitem__(self, idx: int):
+        if idx not in self._cache:
+            self._cache[idx] = self.base[idx]
+        return self._cache[idx]

@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 import torch
 
-from knee.dataset import KneeStudyDataset, StudyDecodeError
+from knee.dataset import CachedDataset, KneeStudyDataset, StudyDecodeError
 from knee.infer import LABEL_COLUMNS, build_submission
 
 _SAMPLE_ROOT = Path(__file__).resolve().parents[1] / "data" / "sample"
@@ -140,3 +140,38 @@ def test_build_submission_still_falls_back_to_0_5_when_dataset_raises_study_deco
     df = build_submission(["broken_study"], predict_fn)
 
     assert (df[LABEL_COLUMNS].to_numpy()[0] == 0.5).all()
+
+
+class _CountingBaseDataset:
+    """Fake base dataset that counts how many times __getitem__ actually ran,
+    so CachedDataset's "decode at most once" guarantee can be verified directly."""
+
+    def __init__(self, n_items=3):
+        self.n_items = n_items
+        self.call_count = 0
+
+    def __len__(self):
+        return self.n_items
+
+    def __getitem__(self, idx):
+        self.call_count += 1
+        return f"item{idx}", idx
+
+
+def test_cached_dataset_returns_the_same_item_as_the_base_dataset():
+    base = _CountingBaseDataset()
+    cached = CachedDataset(base)
+
+    assert cached[1] == ("item1", 1)
+    assert len(cached) == len(base)
+
+
+def test_cached_dataset_only_computes_each_item_once():
+    base = _CountingBaseDataset()
+    cached = CachedDataset(base)
+
+    cached[0]
+    cached[0]
+    cached[0]
+
+    assert base.call_count == 1
