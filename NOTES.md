@@ -290,3 +290,150 @@ stays the stable strategy reference; this is the fast-moving log of what was act
     fairly crude proxy label transferred *some* real signal (0.674 >> 0.5), which is the core
     justification for the whole weak-supervision strategy, but the gap also shows plenty of room
     for a better label source to close.
+- **Closed the Phase 1 gate, with one deliberate substitution.** The gate calls for three things: a
+  scored public-LB entry, a recorded lexical-label OOF macro-AUC, and a gold LOO recalibration
+  number. The first two are done (0.558 LB, 0.7985 pooled OOF). The third was skipped on purpose:
+  checked overlap between the 58 gold studies and the 2,151-study lexically-labeled pool Phase 1
+  actually trained on (`df['StudyInstanceUID']` intersection, keyed off which of the 4 trained
+  labels' lexical rule fired per study) and **36 of the 58 gold studies (62%) are inside the
+  training set**. A frozen-feature LOO fit from `checkpoints/knee_phase1_fold0.pt` would be
+  evaluating the model partly on data it was trained on -- not a valid transfer measurement, and
+  not worth a Kaggle session to compute. The plan's own Phase 3 recipe requires holding gold out of
+  pretraining before a LOO number means anything; Phase 1 never did that because it wasn't gated on
+  gold at all. **Substituted a better measurement that already exists:** the 0.558 LB back-out above
+  (X ≈ 0.674 report-target-vs-rubric-target transfer, on ~390 LB studies -- 6.7x the local gold
+  set) answers the same underlying question ("does report-derived performance track rubric
+  performance") with more statistical power, not less. Recorded as the gate-closing evidence instead.
+  **Forward-looking constraint this creates:** if a clean 58-study gold LOO is ever wanted later
+  (e.g. for the Phase 4 gold transfer-check tier), the 58 UIDs need an explicit holdout flag applied
+  *before* any pretraining -- tag them during Phase 2 prep so Phase 3/4 training can't silently
+  include them the way Phase 1 did.
+- **`results/baseline.csv` written** (was empty pending a real `public_lb`, which now exists):
+  pooled OOF numbers (macro 0.7985; ACL 0.695, Medial Meniscus 0.837, Effusion 0.867, Baker's 0.795,
+  the other 8 labels blank -- untrained), not fold 0's easier 0.8614, since fold 0 is not
+  representative (see above) and every future delta should compare against the honest pooled
+  number. `fold_set=primary_v1` (pooled across all 5 folds, not `primary_v1_fold0`). `train_minutes`
+  (12.0) and `inference_seconds` (11.18) are approximate: 12.0 is 5 folds x ~2.4 min/fold on T4 from
+  the session narrative, not from `experiments.csv` (whose `train_minutes` column is 0.0 for every
+  row -- never actually populated by `train.py`, worth fixing before Phase 4's experiment logging is
+  trusted). 11.18 is the mean of the 5 folds' *validation*-inference seconds from `experiments.csv`
+  (~430 studies each), **not** the true 1,300-study submission-notebook wall time the plan wants for
+  the efficiency track -- that number was never captured because Kaggle's "Submit to Competition"
+  panel doesn't surface per-run timing outside the notebook UI itself. Flagging this so a future
+  session doesn't compare the recorded `inference_seconds` against the efficiency formula's
+  `RuntimeSeconds` as if they were the same thing; getting the real number means checking the
+  submitted notebook version's run log on Kaggle directly.
+
+## 2026-08-09
+
+- **Started Phase 2.** Added `resolve_study_laterality` (`src/knee/dicom.py`) on top of the existing
+  per-header `resolve_laterality`: resolves a study from one representative header per series, and
+  returns `('conflict')` rather than a majority vote when resolved series disagree -- the plan
+  flagged same-study majority-vote as untested against real data, and a knee study shouldn't have
+  two different sides across series in the first place, so a disagreement is more likely a bad tag
+  on one series than a real majority worth trusting blindly.
+- Added `census_study_laterality` (walks `dcm_root/<StudyUID>/*/`, one header read per series) to
+  answer both open Phase 2 gate questions in a single pass: laterality-route coverage and the
+  per-series slice-count distribution. Tested it against the local 20-study sample first --
+  **discovered the local sample only has 1 downloaded file per study** (not the full series), so
+  every local `n_series`/`slice_counts` reads as `1`/`[1]`. This is a real limit of the local dev
+  sample, not a bug: the local box is a code-correctness harness only, per the plan's compute
+  section, and the real distribution requires the actual multi-series Kaggle data. Local route
+  counts on this 1-file sample: 11/20 via `Laterality`, 9/20 `unknown` -- lower than the ~75%
+  `Laterality`-tag coverage an earlier session logged, plausibly because a single file per study
+  sometimes isn't the file that happened to carry the tag; not treated as a real coverage number,
+  just a shape/round-trip check that the function doesn't crash on real files.
+- **Pushed `knee-phase2-laterality-census`** (CPU, internet off, `kaggle kernels push` -- per the
+  earlier finding that CLI push only mattered for the GPU accelerator lottery, which a CPU-only
+  metadata pass doesn't hit) to run the census across the real ~4,407-study corpus: study-level
+  route counts overall and restricted to the 58 gold studies, a route-vs-route agreement check
+  (does `ImageLaterality` agree with `Laterality`/string-match when more than one resolves, sampled
+  over the first 3,000 studies) via a new `_all_routes` helper kept notebook-local (not worth adding
+  to `dicom.py` for a one-off diagnostic), and series-level + per-study slice-count percentiles.
+  Bumped `rsna-knee-src` to a new dataset version first so the notebook picks up the new functions.
+  Results pending -- see below once the run completes.
+- Refactored `decode_and_normalize` to extract `read_rescaled_pixels` (raw float32, slope/intercept
+  applied, no clip) and `percentile_clip_to_uint8` (renamed from a module-private helper so
+  `prep.py` can share it without reaching into another module's underscore-prefixed internals) --
+  pure extract-method, no behavior change; all pre-existing decode tests still pass unchanged.
+- **`src/knee/prep.py` skeleton, TDD, local tests only (no full-corpus run yet -- that's gated on
+  the census results above):**
+  - `normalize_series`: the per-series percentile clip `decode_and_normalize`'s docstring deferred
+    to this module. Computed once across every slice in a series (not per slice), so a uniformly
+    bright slice lands near the bright end of the series' own range instead of being independently
+    flattened.
+  - `mirror_to_canonical`: flips a slice left-right when its resolved side isn't the canonical
+    handedness; a no-op when `side is None` (unresolved) rather than guessing -- unresolved studies
+    stay the caller's responsibility to exclude from laterality-dependent training, per the plan.
+  - `save_study_npz`/`load_study_npz`: one `.npz` per study, JPEG-encoded (q=92) slices per series,
+    round-tripped through a single pickled payload dict (metadata + encoded series) rather than one
+    npz array key per series, since `SeriesInstanceUID` strings aren't guaranteed clean array keys.
+    Uses `allow_pickle=True` -- flagged by the security-guidance hook; documented inline in
+    `prep.py` why it's safe (every `.npz` this pipeline reads was written by this same pipeline onto
+    a private Kaggle dataset, never third-party or competition-supplied data). Round-trip test
+    bounds JPEG's lossy error (mean abs diff < 8/255) rather than requiring exact equality.
+  - Not yet built: the orchestrating `prep_study` that ties `select_series` + `order_slices` +
+    `select_k_evenly_spaced` + `normalize_series` + `mirror_to_canonical` + `save_study_npz`
+    together into the actual per-study prep step, and the sharded Kaggle CPU notebook that runs it
+    across all 4,407 studies. Deliberately deferred until the census above answers how common
+    `unknown`/`conflict` laterality is at full scale -- that number decides whether `prep_study`
+    needs a majority-vote fallback route or can ship with the current three-tag resolution order.
+- **Laterality census results, real ~4,407-study corpus (`results/laterality_census.csv`,
+  `results/series_laterality_routes.csv`), kernel completed in 200s (45.3 ms/study), CPU-only:**
+  study-level route counts: `Laterality` 2179 (49.4%), `unknown` 2129 (48.3%), `SeriesDescription`
+  74 (1.7%), `conflict` 25 (0.6%). **`ImageLaterality` matched zero studies** -- despite being
+  first in the resolution priority order, the tag appears to be entirely absent or empty across
+  this dataset (worth a direct spot-check later, but 0/4,407 with a working `Laterality` fallback
+  strongly suggests it just isn't populated here, not a bug in the reader). **The gold-labeled set
+  is worse than the corpus average: 31/58 (53.4%) unknown, only 27/58 (46.6%) resolve at all** --
+  meaningfully more of the calibration set is laterality-blind than the general population.
+  **This overturns the plan's working assumption.** The 20-study local sample (Phase 0/2 planning)
+  suggested ~25% unresolved; the real number is **48.3%, nearly double**. `SeriesDescription`
+  string-match, hoped to be a meaningful fallback, only rescues 1.7% of studies -- not the "roughly
+  a quarter recovered by string-match" the plan's Phase 2 section speculated about. Conflict rate
+  (series within a study disagreeing) is reassuringly low at 0.6%, and among the 24 studies (of the
+  first 3,000 sampled) where two independent routes both resolved, they agreed 100% of the time --
+  so where a route *does* fire, it's trustworthy; the problem is coverage, not accuracy.
+  Series-level slice counts: p50=30, p95=45, p100=320 (matches the plan's "median 30, long tail to
+  a few hundred" expectation). Per-study total (all series summed): p50=162, p95=369, p100=632. Note
+  for `prep_study`, not yet built: **p0=11**, so some real series have fewer than the planned K=24
+  slices. `select_k_evenly_spaced` already handles n<=k by returning all n without raising, but
+  nothing pads it back up to K yet -- `KneeStudyDataset._load_image` (Phase 1) pads by repeating the
+  last slice; `prep_study` needs the equivalent decision made deliberately, not discovered later at
+  training time.
+- **Bug found and fixed via this census, before it reached prep.py:** 20 studies carry `Laterality`
+  values as spelled-out `"RIGHT"`/`"LEFT"` (1 study has `"B"`, DICOM's bilateral code) instead of
+  the standard single-letter `R`/`L` code string -- real-world tag messiness the plan's "verify
+  before trusting" lesson exists for. `resolve_laterality` returned these raw and unnormalized;
+  none of the 20 happened to land in the `conflict` bucket (each study's series were internally
+  consistent), but downstream `prep.py.mirror_to_canonical` compares `side != canonical` directly,
+  so `side="RIGHT"` would have been treated as a different, non-canonical side from `"R"` and
+  flipped -- silently mirroring an already-correctly-sided image. Fixed: added `_normalize_side`
+  in `dicom.py` (`RIGHT`->`R`, `LEFT`->`L`, case-insensitive) applied at both the `ImageLaterality`
+  and `Laterality` resolution points, and tightened `mirror_to_canonical` to only flip on a
+  recognized `{"L", "R"}` side -- `"B"` (bilateral) and any other non-standard code now pass through
+  unmirrored, same as `side=None`, rather than being guessed at. This fix doesn't change the
+  published route/coverage counts above (normalization only affects which literal string `side`
+  holds for those 20 studies, not which route resolved them or whether they conflicted), so the
+  Kaggle census didn't need re-running.
+- **Consequence for Phase 2 design.** At 48.3% unknown (53.4% on gold), the plan's Phase 2 gate
+  ("laterality resolved for 100% of studies by an explicit route") is unreachable with tag-based
+  resolution alone -- amended the gate line in the plan doc rather than leaving it looking unmet
+  (see below). Same-study majority-vote is already ruled out, not an open option: conflict is only
+  0.6%, so almost every unknown study has *zero* series resolving, not disagreeing series to vote
+  between. **This costs almost nothing today:** of the four side-dependent labels
+  (Medial/Lateral Meniscus, Medial/Lateral OA), only Medial Meniscus currently has any lexical
+  training signal at all (Phase 1), and its lexical-rule gold agreement is already only 55.6% on 9
+  matched studies -- barely above chance. The coverage gap becomes load-bearing in **Phase 3**, once
+  the calibrated LLM starts producing labels for all four side-dependent labels across the full
+  report set -- that is where the exclusion-vs-recovery decision actually needs to be made, not now.
+- **Multi-instance verification, closes the recovery question above.** The census read only the
+  first sorted instance per series; `Laterality` is documented as a series-level DICOM attribute so
+  that should be equivalent to reading every instance, but `ImageLaterality` matching 0/4,407 studies
+  was suspicious enough to check directly rather than assume. Sampled 50 studies from the `unknown`
+  bucket, read **every** instance of **every** series for each (`results/laterality_verify_sample.csv`,
+  8,654 instances total) via `read_laterality_header` instead of `[0]`. **Zero instances, anywhere in
+  the sample, carried `ImageLaterality` or `Laterality`.** The 48.3% unknown figure is confirmed real
+  and structural -- not an artifact of only sampling one file per series -- so there's no cheap
+  per-instance recovery path left to try; the only remaining options are the ones already named above
+  (accept the exclusion, or find a genuinely different signal) and neither is due until Phase 3.

@@ -1,1 +1,2 @@
 date,git_sha,config_hash,fold_set,seed,acl_auc,mcl_auc,medial_meniscus_auc,lateral_meniscus_auc,medial_oa_auc,lateral_oa_auc,pf_oa_auc,effusion_auc,synovitis_auc,bakers_auc,contusion_auc,fracture_auc,macro_auc,train_minutes,inference_seconds,public_lb
+2026-08-08,eea3101,phase1_baseline_efficientnet_b0_n2151_e1_cuda,primary_v1,0,0.6949152542372882,,0.83729216152019,,,,,0.8666617998842552,,0.7949802442528735,,,0.7984623649736518,12.0,11.18,0.558

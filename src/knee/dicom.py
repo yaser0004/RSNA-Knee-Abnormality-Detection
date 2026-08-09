@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
@@ -84,6 +85,20 @@ def select_k_evenly_spaced(ordered_headers: list[dict], k: int) -> list[dict]:
     return result
 
 
+# DICOM's Laterality/ImageLaterality are CS (code string) tags, standard values
+# R/L/B(ilateral)/U(npaired) -- but the real corpus (Phase 2 census, 2026-08-09)
+# has 20 studies using spelled-out "RIGHT"/"LEFT" instead of the single-letter
+# code. Normalize so a caller comparing side to "R"/"L" (e.g. prep.py's
+# mirror_to_canonical) doesn't silently mistreat a spelled-out tag as a
+# different, unrecognized side.
+_SIDE_ALIASES = {"RIGHT": "R", "LEFT": "L"}
+
+
+def _normalize_side(raw: str) -> str:
+    upper = raw.strip().upper()
+    return _SIDE_ALIASES.get(upper, upper)
+
+
 def resolve_laterality(header: dict) -> tuple[str | None, str]:
     """Resolve L/R for a study, in the order: ImageLaterality tag -> Laterality
     tag -> SeriesDescription/BodyPartExamined string match. Returns (side, route).
@@ -95,10 +110,10 @@ def resolve_laterality(header: dict) -> tuple[str | None, str]:
     Guessing from it would poison far more than the 2-3% the plan budgets for, so
     an unresolved study falls through to unknown rather than a wrong guess."""
     if header.get("ImageLaterality"):
-        return header["ImageLaterality"], "ImageLaterality"
+        return _normalize_side(header["ImageLaterality"]), "ImageLaterality"
 
     if header.get("Laterality"):
-        return header["Laterality"], "Laterality"
+        return _normalize_side(header["Laterality"]), "Laterality"
 
     for field in ("SeriesDescription", "BodyPartExamined"):
         text = header.get(field)
@@ -110,25 +125,98 @@ def resolve_laterality(header: dict) -> tuple[str | None, str]:
     return None, "unknown"
 
 
+def resolve_study_laterality(series_headers: list[dict]) -> tuple[str | None, str]:
+    """Resolve a study's laterality from one representative header per series,
+    each resolved independently via resolve_laterality. If every series that
+    resolves agrees, that's the study's side (route = whichever tag produced
+    it). If resolved series disagree, returns ('conflict') rather than a
+    majority vote -- the plan flagged majority-vote as untested against real
+    data, and a knee study shouldn't have two different sides across series,
+    so a disagreement is more likely a bad tag on one series than a real
+    majority to trust. See NOTES.md Phase 2 laterality census."""
+    resolved = [resolve_laterality(h) for h in series_headers]
+    sides = {side for side, _ in resolved if side is not None}
+    if not sides:
+        return None, "unknown"
+    if len(sides) > 1:
+        return None, "conflict"
+    side = sides.pop()
+    route = next(route for s, route in resolved if s == side)
+    return side, route
+
+
+def read_laterality_header(dcm_path: Path) -> dict:
+    """Header-only read (stop_before_pixels) of the four tags
+    resolve_laterality inspects. Separate from
+    knee.dataset._read_slice_header, which reads the geometry fields
+    order_slices needs -- different consumer, different fields, not worth
+    merging into one over-general reader."""
+    ds = pydicom.dcmread(dcm_path, stop_before_pixels=True)
+    return {
+        "ImageLaterality": getattr(ds, "ImageLaterality", None),
+        "Laterality": getattr(ds, "Laterality", None),
+        "SeriesDescription": getattr(ds, "SeriesDescription", None),
+        "BodyPartExamined": getattr(ds, "BodyPartExamined", None),
+    }
+
+
+def census_study_laterality(study_dir: Path) -> dict:
+    """One header-only pass over a study directory
+    (dcm_root/<StudyUID>/<SeriesUID>/*.dcm): resolves the study's laterality
+    from one representative (first, sorted) file per series, and counts
+    slices per series along the way -- Phase 2's gate needs both the
+    laterality-coverage number and the slice-count distribution, and both
+    come from the same directory walk, so one function answers both rather
+    than scanning the corpus twice."""
+    series_dirs = sorted(p for p in study_dir.iterdir() if p.is_dir())
+    series_headers = []
+    slice_counts = []
+    for series_dir in series_dirs:
+        dcm_files = sorted(series_dir.glob("*.dcm"))
+        slice_counts.append(len(dcm_files))
+        if dcm_files:
+            series_headers.append(read_laterality_header(dcm_files[0]))
+    side, route = resolve_study_laterality(series_headers)
+    return {
+        "n_series": len(series_dirs),
+        "slice_counts": slice_counts,
+        "side": side,
+        "route": route,
+        # per-series (side, route) before the study-level agreement/conflict
+        # check collapses them -- lets a caller measure route-vs-route
+        "series_resolutions": [resolve_laterality(h) for h in series_headers],
+    }
+
+
+def read_rescaled_pixels(dcm_path: str) -> np.ndarray:
+    """Read one DICOM slice's pixels as float32, with RescaleSlope/Intercept
+    applied -- the shared first step behind both decode_and_normalize's
+    per-slice clip and prep.py's per-series clip, which needs the raw
+    rescaled values from every slice in a series before it can compute a
+    single series-wide percentile."""
+    ds = pydicom.dcmread(dcm_path)
+    arr = ds.pixel_array.astype(np.float32)
+    slope = float(getattr(ds, "RescaleSlope", 1))
+    intercept = float(getattr(ds, "RescaleIntercept", 0))
+    return arr * slope + intercept
+
+
+def percentile_clip_to_uint8(arr: np.ndarray, lo: float, hi: float) -> np.ndarray:
+    if hi > lo:
+        clipped = np.clip((arr - lo) / (hi - lo), 0, 1)
+    else:
+        clipped = np.zeros_like(arr)
+    return (clipped * 255).astype(np.uint8)
+
+
 def decode_and_normalize(dcm_path: str, size: int = 224) -> np.ndarray:
     """Read a single DICOM slice's pixels, robust-normalize (1st/99th
     percentile clip) to uint8, and resize. Clips per-slice rather than
     per-series -- per-series clipping needs every slice of the series loaded
-    together, which this single-file entry point doesn't have; prep.py should
-    upgrade to a true per-series clip once it operates on a whole series."""
-    ds = pydicom.dcmread(dcm_path)
-    arr = ds.pixel_array.astype(np.float32)
-
-    slope = float(getattr(ds, "RescaleSlope", 1))
-    intercept = float(getattr(ds, "RescaleIntercept", 0))
-    arr = arr * slope + intercept
-
+    together, which this single-file entry point doesn't have; prep.py's
+    normalize_series does the per-series version for the full pipeline."""
+    arr = read_rescaled_pixels(dcm_path)
     lo, hi = np.percentile(arr, [1, 99])
-    if hi > lo:
-        arr = np.clip((arr - lo) / (hi - lo), 0, 1)
-    else:
-        arr = np.zeros_like(arr)
-    arr_uint8 = (arr * 255).astype(np.uint8)
-
+    arr_uint8 = percentile_clip_to_uint8(arr, lo, hi)
     image = Image.fromarray(arr_uint8).resize((size, size), Image.BILINEAR)
     return np.array(image)
