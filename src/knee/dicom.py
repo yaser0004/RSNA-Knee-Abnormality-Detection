@@ -6,6 +6,19 @@ import pandas as pd
 import pydicom
 from PIL import Image
 
+
+class StudyDecodeError(Exception):
+    """Raised when a study's series or slices can't be resolved -- no series
+    metadata, a missing study directory, or every candidate series unusable
+    (e.g. a partially completed download). A single named exception from one
+    shared code path rather than an ambiguous IndexError leaking out of list
+    indexing, so callers (knee.infer.build_submission's per-study fallback, a
+    training loop's collate step, or the Phase 2 prep shard loop) can catch it
+    deliberately. Lives here rather than in knee.dataset because knee.prep
+    raises it too, and prep must not import dataset -- that would pull torch
+    into the CPU-only prep notebooks and make the two modules circular."""
+
+
 # Priority order established in the plan's Phase 2 spec: sagittal-fluid-sensitive,
 # coronal-fluid-sensitive, axial-fluid-sensitive, sagittal-non-fluid.
 _SERIES_PRIORITY = [
@@ -147,16 +160,56 @@ def resolve_study_laterality(series_headers: list[dict]) -> tuple[str | None, st
 
 def read_laterality_header(dcm_path: Path) -> dict:
     """Header-only read (stop_before_pixels) of the four tags
-    resolve_laterality inspects. Separate from
-    knee.dataset._read_slice_header, which reads the geometry fields
-    order_slices needs -- different consumer, different fields, not worth
-    merging into one over-general reader."""
+    resolve_laterality inspects. Separate from _read_slice_header, which reads
+    the geometry and acquisition fields the prep pipeline needs -- different
+    consumer, different fields, not worth merging into one over-general
+    reader."""
     ds = pydicom.dcmread(dcm_path, stop_before_pixels=True)
     return {
         "ImageLaterality": getattr(ds, "ImageLaterality", None),
         "Laterality": getattr(ds, "Laterality", None),
         "SeriesDescription": getattr(ds, "SeriesDescription", None),
         "BodyPartExamined": getattr(ds, "BodyPartExamined", None),
+    }
+
+
+def _plain_str(value) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _read_slice_header(dcm_path: Path) -> dict:
+    """Header-only read (stop_before_pixels) of everything downstream needs
+    about one slice: the geometry order_slices sorts on, and the acquisition
+    tags Phase 2's prep census counts.
+
+    The census fields live here rather than in a second pass because
+    read_rescaled_pixels opens the dataset and discards it -- and a separate
+    sweep would describe files rather than the slices prep actually decoded.
+    TransferSyntaxUID lives on file_meta (absent in raw/implicit-VR files, so
+    it's guarded); PhotometricInterpretation catches MONOCHROME1, which is
+    tone-inverted and which percentile_clip_to_uint8 does not correct for."""
+    ds = pydicom.dcmread(dcm_path, stop_before_pixels=True)
+    ipp = getattr(ds, "ImagePositionPatient", None)
+    iop = getattr(ds, "ImageOrientationPatient", None)
+    spacing = getattr(ds, "PixelSpacing", None)
+    file_meta = getattr(ds, "file_meta", None)
+    return {
+        "SOPInstanceUID": ds.SOPInstanceUID,
+        "ImagePositionPatient": [float(x) for x in ipp] if ipp is not None else None,
+        "ImageOrientationPatient": [float(x) for x in iop] if iop is not None else None,
+        "InstanceNumber": int(getattr(ds, "InstanceNumber", 0)),
+        "Rows": int(getattr(ds, "Rows", 0)) or None,
+        "Columns": int(getattr(ds, "Columns", 0)) or None,
+        "PixelSpacing": [float(x) for x in spacing] if spacing is not None else None,
+        # plain str, not pydicom's str subclasses: these end up pickled into the
+        # prepped .npz meta, and the artifacts should be readable without pydicom
+        "PhotometricInterpretation": _plain_str(getattr(ds, "PhotometricInterpretation", None)),
+        "TransferSyntaxUID": _plain_str(getattr(file_meta, "TransferSyntaxUID", None)),
+        "PatientSex": _plain_str(getattr(ds, "PatientSex", None)),
+        "path": dcm_path,
     }
 
 
@@ -168,6 +221,10 @@ def census_study_laterality(study_dir: Path) -> dict:
     laterality-coverage number and the slice-count distribution, and both
     come from the same directory walk, so one function answers both rather
     than scanning the corpus twice."""
+    if not study_dir.is_dir():
+        # a shard loop catching StudyDecodeError should also catch a study
+        # directory that simply isn't there, rather than an OSError from iterdir
+        raise StudyDecodeError(f"no study directory at {study_dir}")
     series_dirs = sorted(p for p in study_dir.iterdir() if p.is_dir())
     series_headers = []
     slice_counts = []

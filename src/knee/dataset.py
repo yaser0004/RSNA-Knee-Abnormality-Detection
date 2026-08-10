@@ -2,34 +2,42 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pydicom
 import torch
 from torch.utils.data import Dataset
 
-from knee.dicom import decode_and_normalize, order_slices, select_k_evenly_spaced, select_series
+from knee.dicom import (
+    StudyDecodeError,
+    _read_slice_header,
+    decode_and_normalize,
+    order_slices,
+    select_k_evenly_spaced,
+    select_series,
+)
 from knee.infer import LABEL_COLUMNS
+from knee.prep import load_study_npz, mirror_to_canonical, mirrors_in_plane
+
+# StudyDecodeError and _read_slice_header moved to knee.dicom (knee.prep raises
+# and calls them, and prep must not import this module -- that would pull torch
+# into the CPU-only prep notebooks). Re-exported here because callers and tests
+# already import them from knee.dataset.
+__all__ = [
+    "CachedDataset",
+    "KneeStudyDataset",
+    "PreppedStudyDataset",
+    "StudyDecodeError",
+]
 
 
-class StudyDecodeError(Exception):
-    """Raised when a study's series or slices can't be resolved -- no series
-    metadata, or a series directory with no .dcm files (e.g. a partially
-    completed download). A single named exception from one shared code path
-    rather than an ambiguous IndexError leaking out of list indexing, so
-    callers (knee.infer.build_submission's per-study fallback, or a training
-    loop's collate step) can catch it deliberately."""
-
-
-def _read_slice_header(dcm_path: Path) -> dict:
-    ds = pydicom.dcmread(dcm_path, stop_before_pixels=True)
-    ipp = getattr(ds, "ImagePositionPatient", None)
-    iop = getattr(ds, "ImageOrientationPatient", None)
-    return {
-        "SOPInstanceUID": ds.SOPInstanceUID,
-        "ImagePositionPatient": [float(x) for x in ipp] if ipp is not None else None,
-        "ImageOrientationPatient": [float(x) for x in iop] if iop is not None else None,
-        "InstanceNumber": int(getattr(ds, "InstanceNumber", 0)),
-        "path": dcm_path,
-    }
+def _lookup_labels(labels_df: pd.DataFrame | None, study_uid: str) -> torch.Tensor | None:
+    """None when the dataset carries no labels at all (inference); a row of
+    NaN when this particular study has none (the weak-supervision case, where
+    NaN means "excluded from the loss", never "negative")."""
+    if labels_df is None:
+        return None
+    row = labels_df[labels_df["StudyInstanceUID"] == study_uid]
+    if row.empty:
+        return torch.full((len(LABEL_COLUMNS),), float("nan"))
+    return torch.tensor(row[LABEL_COLUMNS].to_numpy()[0], dtype=torch.float32)
 
 
 class KneeStudyDataset(Dataset):
@@ -85,12 +93,97 @@ class KneeStudyDataset(Dataset):
         return torch.from_numpy(volume).unsqueeze(1).repeat(1, 3, 1, 1)
 
     def _lookup_labels(self, study_uid: str) -> torch.Tensor | None:
-        if self.labels_df is None:
-            return None
-        row = self.labels_df[self.labels_df["StudyInstanceUID"] == study_uid]
-        if row.empty:
-            return torch.full((len(LABEL_COLUMNS),), float("nan"))
-        return torch.tensor(row[LABEL_COLUMNS].to_numpy()[0], dtype=torch.float32)
+        return _lookup_labels(self.labels_df, study_uid)
+
+
+class PreppedStudyDataset(Dataset):
+    """Reads the Phase 2 prep artifacts (one <StudyUID>.npz per study, written
+    by prep_study + save_study_npz) instead of raw DICOMs, so a training epoch
+    costs a JPEG decode per slice rather than a DICOM decode. Same
+    (image, labels, study_uid) contract as KneeStudyDataset, so train.py is
+    unchanged.
+
+    Mirroring to canonical happens here rather than in the artifact: the
+    stored pixels stay neutral to a laterality resolution Phase 3 may still
+    improve. That paid for itself once already -- the in-plane flip turned out
+    to be wrong for Sagittal series (see mirrors_in_plane), and fixing it cost
+    nothing because the artifacts were never mirrored. mirror_to_canonical is
+    applied per slice *before* np.stack -- np.fliplr returns a negative-stride
+    view and torch.from_numpy rejects those.
+
+    The artifacts hold 1-4 series of variable length. Padding is the same
+    repeat-the-last rule KneeStudyDataset already uses, extended to the series
+    axis so every study collates to a fixed (max_series * n_slices) volume.
+    That flattening is a Phase 2 placeholder: Phase 5's attention pooling wants
+    a real series axis with a validity mask, and should replace it rather than
+    inherit it."""
+
+    def __init__(
+        self,
+        study_uids: list[str],
+        npz_root: str | Path,
+        labels_df: pd.DataFrame | None = None,
+        n_slices: int = 24,
+        max_series: int = 4,
+        canonical: str = "R",
+    ):
+        self.study_uids = list(study_uids)
+        self.npz_root = Path(npz_root)
+        self.labels_df = labels_df
+        self.n_slices = n_slices
+        self.max_series = max_series
+        self.canonical = canonical
+
+    def __len__(self) -> int:
+        return len(self.study_uids)
+
+    def __getitem__(self, idx: int):
+        study_uid = self.study_uids[idx]
+        image = self._load_image(study_uid)
+        labels = self._lookup_labels(study_uid)
+        return image, labels, study_uid
+
+    def _load_image(self, study_uid: str) -> torch.Tensor:
+        path = self.npz_root / f"{study_uid}.npz"
+        if not path.exists():
+            raise StudyDecodeError(f"no prepped artifact at {path}")
+
+        # decode only what this configuration returns -- at 2 series x 16 slices
+        # that is a third of the blobs a full read would decode and discard
+        series_slices, meta = load_study_npz(
+            path, max_series=self.max_series, max_slices=self.n_slices
+        )
+        if not series_slices:
+            raise StudyDecodeError(f"prepped artifact for {study_uid} holds no series")
+
+        side = meta.get("side")
+        series_meta = meta.get("series", {})
+        blocks = []
+        for series_uid in sorted(series_slices):
+            # only Axial/Coronal have medial-lateral along the image's horizontal
+            # axis; flipping a Sagittal series mirrors anterior-posterior instead
+            plane = series_meta.get(series_uid, {}).get("Anatomical_Plane")
+            flip_side = side if mirrors_in_plane(plane) else None
+            slices = [
+                mirror_to_canonical(s, flip_side, canonical=self.canonical)
+                for s in series_slices[series_uid]
+            ]
+            while len(slices) < self.n_slices:
+                slices.append(slices[-1])
+            blocks.append(slices[: self.n_slices])
+
+        while len(blocks) < self.max_series:
+            blocks.append(blocks[-1])
+
+        volume = np.stack([s for block in blocks for s in block]).astype(np.float32) / 255.0
+        # expand, not repeat: identical values, but a view instead of a 75MB
+        # float32 copy per study (max_series * n_slices * 3 * size^2). The copy
+        # measured as the single largest cost in the loader -- larger than all
+        # 96 JPEG decodes -- and collate has to materialize the batch anyway.
+        return torch.from_numpy(volume).unsqueeze(1).expand(-1, 3, -1, -1)
+
+    def _lookup_labels(self, study_uid: str) -> torch.Tensor | None:
+        return _lookup_labels(self.labels_df, study_uid)
 
 
 class CachedDataset(Dataset):

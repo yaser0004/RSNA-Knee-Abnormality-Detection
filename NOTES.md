@@ -437,3 +437,250 @@ stays the stable strategy reference; this is the fast-moving log of what was act
   and structural -- not an artifact of only sampling one file per series -- so there's no cheap
   per-instance recovery path left to try; the only remaining options are the ones already named above
   (accept the exclusion, or find a genuinely different signal) and neither is due until Phase 3.
+
+### Phase 2 prep pipeline — local dry run before the Kaggle pilot (2026-08-09)
+
+`prep_study` (orchestrator) and `PreppedStudyDataset` (prepped loader) written and run end to end
+against `data/sample/test_series` — one real study, 5 series, 30/30/34/108 slices, prepped at
+K=24 / 256px / max_series=4. Numbers below are local hardware on one study; the Kaggle pilot
+(`notebooks/phase2-prep/`, 50 studies) is the authoritative measurement. Recorded here because two
+of them already change decisions.
+
+- **Non-square matrices are real.** The four stored series report `(Rows, Columns)` of
+  `(640, 640)`, `(640, 1280)`, `(800, 800)`, `(960, 960)`. The 640×1280 axial is 1:2 — resizing it
+  to a square 256×256 squashes it horizontally by 2×, and does so unevenly across the corpus since
+  other series are square. This is the pad-to-square question the pilot's shape counter exists to
+  answer, and it fired on the very first real study rather than staying hypothetical. Not fixed
+  yet: the corpus-wide frequency decides whether it's a handful of series or a systematic bias, and
+  guessing at 4,407 studies is exactly what the census discipline exists to prevent.
+- **Transfer syntax / photometric:** all four series Explicit VR Little Endian
+  (`1.2.840.10008.1.2.1`), all MONOCHROME2. No MONOCHROME1 (which would be tone-inverted and which
+  `percentile_clip_to_uint8` does not correct for) on this study — the pilot checks the corpus.
+- **Size: 1.59 MB/study** at 4 series × 24 slices × 256px, JPEG q=92 — above the plan's 0.7–1.5
+  MB/study estimate, though this study stores the full 4-series budget and the census median is
+  fewer series. Extrapolates to ~7 GB for 4,407 studies, inside the plan's 4–8 GB total.
+- **Prep throughput: ~1.9 s/study** → ~2.3 h for the full corpus on local hardware, comfortably
+  inside one 12 h Kaggle session even with CPU-speed margin. Sharding stays the resume mechanism
+  regardless (`/kaggle/working` starts empty each run).
+- **Loader latency: 32 ms/study, against the plan's <20 ms gate — and the cause was not what the
+  plan assumed.** Breaking down the 96-slice load:
+
+  | step | ms |
+  |---|---|
+  | `.repeat(1, 3, 1, 1)` to 3 channels | 21.9 |
+  | 96 PIL JPEG decodes | 20.6 |
+  | mirror + stack + `/255` | 10.7 |
+  | npz open + unpickle | 1.4 |
+
+  The single largest cost was the grayscale→3-channel expansion, not the JPEG decode the plan
+  flagged: `repeat` materializes a `96 × 3 × 256 × 256` float32 copy — **75 MB per study** — and
+  then collate copies it again into the batch. Switched `PreppedStudyDataset` to
+  `.expand(-1, 3, -1, -1)`, a view: byte-identical values (asserted in the tests), 56 ms → 32 ms,
+  and one materialization instead of two. Verified through a real `DataLoader` at
+  `num_workers` 0 and 2 — the batch collates contiguous as normal.
+
+  32 ms still misses the <20 ms gate, and the prepared fix in the plan (`slice_indices` on
+  `load_study_npz`, decode a subset) only addresses the 20.6 ms decode — training needs all 96
+  slices, so it would buy nothing there. It remains the right fix for the efficiency-track
+  submission (2 series × 12–16 slices). For training throughput the honest answer is the existing
+  `CachedDataset` plus DataLoader workers: 32 ms/study is ~60× faster than the 1.9 s raw-DICOM path
+  it replaces, and the first epoch is the only one that pays it. **Gate 1's real number comes from
+  the Kaggle pilot; this is the local prior, not the verdict.** Cutting K to make the gate pass is
+  still off the table — that trades training signal for a loader problem.
+- **75 MB/study of float32 is a Phase 4/5 memory constraint**, not a Phase 2 one: a batch of 8 at
+  4 series × 24 slices × 3 channels × 256px is ~600 MB before the model allocates anything. Named
+  here so it lands as a known budget rather than a surprise OOM at the first training batch.
+- **One truncated file exists in the local sample** (`data/sample/test_series/.../44334485…/…198.dcm`,
+  0 bytes — a partially completed API download, not a corpus defect). It surfaced a real hole:
+  header reads can fail as well as pixel decodes, and one unreadable file was killing the whole
+  study. `prep_study` now records header failures and pixel-decode failures separately in
+  `meta["decode_failures"]` and skips an unusable series rather than the study, raising
+  `StudyDecodeError` only when no series survives.
+
+**Layering change made while implementing this:** `StudyDecodeError` and `_read_slice_header` moved
+from `dataset.py` to `dicom.py`. `prep.py` needs both, and `dataset.py` needs `prep.py`'s
+`load_study_npz`/`mirror_to_canonical` — importing across would have been circular, and would also
+have dragged `torch` (via `dataset.py` → `infer.py`) into the CPU-only prep notebooks. `dicom.py` is
+the layer both already depend on. Both names are re-exported from `knee.dataset` so existing callers
+and tests are unaffected. `_read_slice_header` also now returns the acquisition tags the pilot's
+decode census counts (`TransferSyntaxUID`, `PhotometricInterpretation`, `Rows`, `Columns`,
+`PixelSpacing`, `PatientSex`) — it is already called on every slice for ordering, so this costs
+nothing and describes the slices prep actually read rather than a separate sweep over files.
+
+**Deviation from the plan doc's Phase 2 wording, recorded so it isn't re-litigated:** artifacts store
+*unmirrored* pixels plus `side`/`route`; `mirror_to_canonical` runs at load time in
+`PreppedStudyDataset`. The plan's "canonicalize laterality — required, not optional" is about what
+the model sees, and that still holds. Doing the flip at load keeps ~7 GB of artifacts neutral to a
+laterality resolution Phase 3 may still improve (48.3% unknown today), so better coverage later
+costs no re-prep.
+
+### Phase 2 Kaggle pilot — 50 studies, the four blocking gates (2026-08-10)
+
+`notebooks/phase2-prep/` at `PILOT_N=50`, K=24 / 256px / max_series=4, CPU kernel, internet off.
+Consumer kernel `notebooks/phase2-prep-consume/` run against its output for gate 2.
+
+**Gate 2 — aggregation hop: PASS.** The prep kernel's output attached to a separate consumer kernel
+via `kernel_sources` and landed at `/kaggle/input/notebooks/<user>/knee-phase2-prep/prepped`.
+**50/50 `.npz` files present, 0 missing, 0 unexpected, 0 unreadable**, all 50 read back through
+`PreppedStudyDataset`. The file-count question the plan called the main operational unknown is
+answered: individual files survive the hop, no Kaggle-API dataset-creation fallback needed.
+
+**Gate 3 — decode coverage: PASS.** 200 series across 50 studies, every one stored (4/4 series for
+all 50 studies), **zero decode failures, zero header failures, zero skipped series**.
+- `TransferSyntaxUID`: 200/200 `1.2.840.10008.1.2.1` (Explicit VR Little Endian, uncompressed). No
+  JPEG Lossless, no JPEG 2000 — the pydicom-plugin risk the plan flagged does not exist in this
+  corpus. Phase 1 seeing only one syntax was representative, not lucky.
+- `PhotometricInterpretation`: 200/200 MONOCHROME2. **No MONOCHROME1**, so the tone-inversion fix
+  `percentile_clip_to_uint8` would have needed is not required. Counted rather than assumed, which
+  was the point.
+- Matrix size: **10/200 series (5%) are non-square**, worst ~1.23:1. **Superseded — see the spread
+  re-run below; the contiguous sample understated this.**
+- `PixelSpacing`: **72 distinct values** across 200 series (0.234–0.5625 mm). Resizing every series
+  to a fixed 256px therefore hands the model a different physical field of view per study — a Phase
+  4 modelling consideration, not a prep bug, but it is now a measured number rather than a guess.
+- Slice counts: **40/200 series (20%) store fewer than 24 slices** (min 15 originals). Storing the
+  true count and padding at load is load-bearing for a fifth of the corpus, not an edge case.
+
+**Gate 4 — size budget: PASS on the total.** 1.46 MB/study mean, p50 1.47, p95 1.80, max 1.99 —
+slightly over the plan's 0.7–1.5 MB/study band, but every study here stored the full 4-series
+budget. Extrapolates to **6.4 GB for 4,407 studies**, inside the plan's 4–8 GB target.
+Prep throughput **1.95 s/study → ~2.4 h for the full corpus**, comfortably inside one 12 h session,
+so `N_SHARDS = 1` is sufficient (sharding stays available as the resume mechanism regardless).
+
+**Gate 1 — loader latency: MISSES the <20 ms target at the training configuration.** Measured on
+Kaggle CPU over the 50 pilot artifacts:
+
+| configuration | volume | ms/study (mean) | p95 |
+|---|---|---|---|
+| 4 series × 24 slices (training) | 96×3×256×256 | **58.9** | 66.6 |
+| 2 series × 16 slices (efficiency track) | 32×3×256×256 | 22.4 | 25.5 |
+| 2 series × 12 slices | 24×3×256×256 | **17.6 — under 20** | 20.0 |
+| raw DICOM path this replaces | — | **1945** | — |
+
+Two fixes were applied before this measurement, both real:
+- `.repeat(1,3,1,1)` → `.expand(-1,3,-1,-1)` for the grayscale→3-channel step. Byte-identical values
+  (asserted in tests), but a view instead of a 75 MB float32 copy per study. The copy had been the
+  single largest cost in the loader — larger than all 96 JPEG decodes — and collate materializes the
+  batch anyway, so this removed one of two materializations.
+- `load_study_npz` gained `max_series` / `max_slices`, and `PreppedStudyDataset` now decodes only
+  the blobs it returns instead of decoding 4×24 and discarding most of it. Cost is close to linear
+  in blobs decoded, which is what makes the efficiency-track row above viable.
+
+Cutting K to make the number pass remains off the table — that trades training signal for a loader
+problem. What is left at 4×24 is ~85% irreducible PIL JPEG decode of 96 slices.
+
+**The gate's threshold is missed; its purpose is met.** 58.9 ms/study × 4,407 = **~4.3 min of
+loading per epoch**, against ~2.4 h for the raw-DICOM path — a **33× speedup**, which is what Phase 2
+existed to buy. Loading is no longer the bottleneck: 4,407 × 96 = 423k slice forward/backward passes
+per epoch is the dominant cost, and DataLoader prefetch overlaps loading with it. (That comparison is
+an estimate — GPU epoch time has not been measured at this configuration, and should be before the
+plan's ~42-experiment budget is committed.) One measured caveat: DataLoader `num_workers` > 0 did
+**not** help locally (0/2/4 workers all ~65 ms/study) because each sample is large enough that IPC
+serialization offsets the parallel decode — prefetch overlap, not worker count, is the mechanism
+that hides this. `CachedDataset` drops epoch 2+ to ~0 ms/study but cannot hold the full corpus in
+RAM (4,407 × 25 MB), so it stays a small-subset tool.
+
+**Pilot re-run on a corpus-spread sample (108 studies) — gate 3 confirmed, and one earlier
+conclusion overturned.** The first pilot took `all_study_uids[:50]`, a contiguous prefix, and drew
+corpus-wide conclusions from it — the opposite of how the laterality census was done, and it caught
+only **1 of the 58 gold studies**, the only ones with real labels. Re-ran over a stride sample
+unioned with every gold study: **108 studies, 432 series, all 58 gold included**.
+
+Confirmed and strengthened: **432/432 series** Explicit VR Little Endian, **432/432 MONOCHROME2**,
+**zero decode failures, zero header failures, zero skipped series**, 4/4 series stored for all 108
+studies. Route mix (`Laterality` 53 / `unknown` 52 / `conflict` 2 / `SeriesDescription` 1) now
+reproduces the shape of the full census, which the prefix sample did not. Size 1.43 MB/study mean
+(**6.3 GB** extrapolated), prep 2.14 s/study (**~2.6 h** full corpus). Loader: **53.4 ms/study** at
+4×24, 20.1 at 2×16, 15.6 at 2×12.
+
+**Overturned: non-square series are more common and more extreme than the prefix suggested, and
+2:1 series exist in the training set after all.** 34/432 series (**7.9%**) are non-square, worst
+ratio **2.0:1** — including four 640×1280 series, the exact shape the local dry run found in the
+*test* sample. The earlier note here claimed that aspect ratio was test-set-only and framed
+pad-to-square as a Phase 6 inference-consistency question; that was an artifact of sampling one
+contiguous block, and is wrong. Resizing straight to 256×256 squashes those 34 series by up to 2×
+horizontally, unevenly across the corpus. Full distribution: 320×300 (9), 384×348 (6), 640×1280 (4),
+348×384 (3), 640×540 (2), 640×580 (2), 512×480 (2), and one each of 384×332, 512×384, 512×544,
+544×512, 640×680, 808×800.
+
+Also confirmed: **81/432 series (18.8%) store fewer than 24 slices**, so pad-at-load is load-bearing
+for nearly a fifth of the corpus, not an edge case.
+
+**Hardening applied before the re-run**, all of it aimed at the full run surviving:
+- The shard loop now catches `Exception`, not just `StudyDecodeError`. `select_k_evenly_spaced`
+  raises `AssertionError` by design, a malformed `series_df` row raises `KeyError`, and a 320-slice
+  series can raise `MemoryError` — any of which would otherwise abort a multi-hour shard at study
+  4,000 and lose every artifact with it. Failures are recorded per study in
+  `prep_failed_shard*.csv` rather than being silently absent from the count.
+- `prep_failed_shard*.csv` is written with explicit columns, so the expected zero-failure case
+  produces a readable file rather than a headerless one `read_csv` rejects.
+
+### Phase 2 full corpus run + visual check (2026-08-10)
+
+Four shard kernels (`notebooks/phase2-prep-shard0..3/`), identical code differing only in
+`SHARD_INDEX`, run in parallel on Kaggle CPU. Consumer kernel re-verified the union.
+
+**Full corpus prepped and verified: 4,407/4,407.** Shard sizes 1102/1102/1102/1101, **0 duplicated,
+0 missing, 0 unexpected, 0 studies failed prep, 0 artifacts unreadable** (all 4,407 read back).
+**All 58 gold studies present.**
+
+Verified as a real partition, not just a matching total: each shard's UID set is *exactly* its own
+contiguous index range over the sorted corpus — `[0,1102) [1102,2204) [2204,3306) [3306,4407)`, all
+four reported "exact". A count of 4,407 with 0 duplicates could in principle hide two shards
+swapping studies; this checks the ranges themselves, which is what the resume model depends on (a
+re-run of shard *i* has to reproduce shard *i*'s studies and nothing else).
+`gold_study_uids.csv` (written by shard 0 only) is present, holds **58 UIDs, all of them prepped,
+and exactly matches the `is_gold` flag across the four manifests** — the gold holdout Phase 3/4
+requires is on disk and consistent, not merely assumed from a count. Route mix over the full corpus reproduces the published census
+exactly: `Laterality` 2179 (49.4%), `unknown` 2129 (48.3%), `SeriesDescription` 74 (1.7%),
+`conflict` 25 (0.6%) — matching `results/laterality_census.csv` to the tenth of a percent, which is
+the independent confirmation that `prep_study` resolves laterality the same way the census did.
+Loader over the attached 4-shard dataset: **39–66 ms/study** across two consumer-kernel runs (39.2
+p95 44.8, then 65.7 p95 73.9 on a later run reading the same data) — the spread is Kaggle CPU
+contention, not a code change, and is worth remembering before treating any single loader
+measurement as precise. Gate 2 re-confirmed at full scale, not just on the 50-file pilot.
+
+**The visual check earned its place — it caught a real bug.** `mirror_to_canonical` was being
+applied to every series regardless of acquisition plane. Verified against real
+`ImageOrientationPatient` direction cosines:
+
+| plane | row direction (image horizontal) | in-plane flip valid? |
+|---|---|---|
+| Axial | dominantly patient **+x** | yes — horizontal axis is medial-lateral |
+| Coronal | dominantly patient **+x** | yes |
+| Sagittal | dominantly patient **+y** | **no** — horizontal axis is anterior-posterior |
+
+Flipping a sagittal slice mirrors the knee **front-to-back**, not side-to-side. It was doing this to
+L-side studies only, leaving R-side ones untouched — introducing exactly the systematic L-vs-R
+difference canonicalization is supposed to remove. Scope: `_SERIES_PRIORITY` puts sagittal first and
+fourth, so **2 of the 4 stored series per study** were affected, on ~49% of the corpus.
+
+Fixed with `mirrors_in_plane()` in `prep.py`; `PreppedStudyDataset` now reads each series'
+`Anatomical_Plane` from the artifact's meta and only flips Axial/Coronal. An unknown plane is not
+flipped, consistent with the rest of the pipeline's refusal to guess.
+
+**The store-unmirrored decision paid for itself here.** Because artifacts hold raw orientation plus
+`side`/`route`, this was a loader-only fix — no re-prep of 6.2 GB, no re-run of four shard kernels.
+Had mirroring been baked in at prep time (the plan's literal Phase 2 wording), the corpus would have
+needed regenerating.
+
+**Still open: sagittal laterality is not canonicalized at all.** For a sagittal series the
+medial-lateral axis runs along the *slice normal*, i.e. the slice ordering — a left and a right knee
+traverse medial→lateral in opposite directions through the stack. Canonicalizing would mean
+reversing slice order for one side, which is a different mechanism from an in-plane flip and changes
+what the depth axis means to the model. Not implemented: it is a Phase 4/5 modelling decision
+(attention pooling over slices may be order-invariant anyway), and the artifacts stay neutral to it.
+Not doing it is strictly better than the flip that was there, which was actively wrong.
+
+**Visual check result (`notebooks/phase2-visual-check/`):** 8 studies × 4 series, mid-slice,
+including 2 `route == "unknown"` studies. All recognizably knees, in the labelled plane, correct
+slice counts. Captions confirm the fix reads correctly: `L` + Axial/Coronal → flipped, `L` +
+Sagittal → as-stored, `R` and `unknown` → as-stored. (One iteration was needed on the caption logic
+itself: it initially labelled a series "flipped" whenever a side was resolved, but
+`mirror_to_canonical` no-ops when the side is already canonical, so R-side studies were mislabelled.
+The pipeline was correct; a gate artifact that misreports is worse than none, so it was fixed and
+re-run.)
+
+**Phase 2 gate: closed.** 4,407 artifacts, 6.2 GB, all 58 gold studies, explicit laterality route on
+every study, decode coverage counted with every distinct value accounted for, artifact hop proven at
+full scale, and the visual check reviewed.

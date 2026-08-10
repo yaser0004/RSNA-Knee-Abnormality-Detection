@@ -8,7 +8,8 @@ scored by macro-averaged ROC AUC. Targets both the main leaderboard and the Effi
 Full strategy lives in the plan document (not tracked in this repo); empirical findings from actually
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
 kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1 baseline
-complete — trained, submitted, and scored on the real leaderboard; Phase 2 (preprocessing) started.**
+complete — trained, submitted, and scored on the real leaderboard; Phase 2 (preprocessing) gate
+closed — all 4,407 studies prepped and verified.**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
@@ -24,16 +25,46 @@ in `results/laterality_census.csv`) found laterality resolves for only **51.1%**
 studies via DICOM tags (`ImageLaterality`/`Laterality`/description string-match) — well below the
 ~75% a small local sample suggested, and confirmed structural (not a sampling gap) via a
 multi-instance follow-up check (`notebooks/phase2-laterality-verify/`,
-`results/laterality_verify_sample.csv`). `src/knee/prep.py` has the per-series normalization,
-laterality-mirroring, and JPEG/`.npz` storage building blocks with local tests; the full-corpus prep
-run and the orchestrating `prep_study` function are the next step — see `NOTES.md` (2026-08-09) for
-the complete numbers and reasoning.
+`results/laterality_verify_sample.csv`).
 
-Core library (`src/knee/`) covered by tests (71 passing): DICOM series/slice selection, laterality
+The prep pipeline is written, tested, and validated on Kaggle: `prep_study` turns one study into up
+to 4 series × 24 slices at 256px (per-series normalized, padded to square, JPEG q=92 in a single
+`.npz`, ~1.4 MB/study), and `PreppedStudyDataset` reads those artifacts back into the same tensor
+contract `KneeStudyDataset` produces — **51 ms/study against 1,912 ms for the raw-DICOM path it
+replaces, a 37× speedup**. `prep_study` is pure (returns data, writes nothing) so Phase 6's
+submission notebook can run the identical path over the test set instead of growing a second copy
+inside `infer.py`, and artifacts store *unmirrored* pixels plus the resolved `side`/`route`, with
+mirroring applied at load time so they stay neutral to a laterality resolution Phase 3 may still
+improve.
+
+**The Phase 2 gate is closed: all 4,407 studies are prepped** (four parallel shard kernels,
+`notebooks/phase2-prep-shard0..3/`, 6.2 GB), verified by a consumer kernel — 0 missing, 0 duplicated,
+0 failed, 0 unreadable, all 58 gold studies present, and a laterality route mix matching the
+published census to the tenth of a percent. A 108-study pilot (stride-sampled across the corpus plus
+every gold study) cleared the four blocking gates first: the artifact hop works via `kernel_sources`
+with no files lost, decode coverage is clean (432/432 series one transfer syntax, all MONOCHROME2,
+zero decode failures), and size held to budget. The pilot also found **7.9% of series are non-square,
+worst ratio 2:1**, so slices are letterboxed to square before the resize rather than squashed. Loader
+latency misses the plan's <20 ms/study target at the full training configuration (39–51 ms for 96
+slices, ~85% irreducible JPEG decode) but clears it at the efficiency-track shape; loading is no
+longer the bottleneck either way.
+
+The visual check (`notebooks/phase2-visual-check/`) caught a real bug worth knowing about: laterality
+mirroring was being applied to *every* series, but a sagittal image's horizontal axis is
+anterior–posterior, not medial–lateral, so flipping one mirrors the knee front-to-back. Only
+Axial/Coronal series are mirrored now (`mirrors_in_plane`). Because artifacts store unmirrored pixels
+by design, this was a loader-only fix — no re-prep. Sagittal laterality is still not canonicalized
+(it would require reversing slice order, a Phase 4/5 modelling decision). Full measured numbers and
+the reasoning behind each decision are in `NOTES.md` (2026-08-09 and 2026-08-10).
+
+Core library (`src/knee/`) covered by tests (96; 94 run without a GPU-capable box — the two
+`test_model.py` cases instantiate a backbone): DICOM series/slice selection, laterality
 resolution (per-header and per-study, with real-world tag-value normalization), pixel decode/
-normalize, per-series normalization and laterality mirroring, JPEG-in-`.npz` study storage, dataset
-classes (including an in-memory decode cache), model, NaN-masked BCE loss, fold assignment,
-training/eval loops, experiment logging, macro AUC, and a submission writer with a 0.5 fallback.
+normalize, per-series normalization, pad-to-square and laterality mirroring, JPEG-in-`.npz` study
+storage with selective decode, the `prep_study` orchestrator (including its skip-unusable-series and
+decode-failure recording), dataset classes for both raw and prepped studies (plus an in-memory
+decode cache), model, NaN-masked BCE loss, fold assignment, training/eval loops, experiment logging,
+macro AUC, and a submission writer with a 0.5 fallback.
 
 Only 58 of 4,407 training studies carry gold rubric labels (verified directly, not the "a few
 hundred" first assumed) — this is effectively a weak-supervision competition, not a conventional
@@ -52,12 +83,14 @@ Target layout (full plan); items marked `[done]` exist today, everything else is
 ```
 src/knee/            package pushed to Kaggle as a private dataset, imported by thin notebooks
   dicom.py           [done] header scan, series/slice selection, per-header and per-study
-                      laterality resolution + census, decode/normalize
-  prep.py            [in progress] normalize_series, mirror_to_canonical, JPEG-in-.npz study
-                      storage done + tested; prep_study orchestrator and the full-corpus
-                      run are next (see NOTES.md 2026-08-09)
-  dataset.py         [done, Phase 1 shape] torch Dataset directly over raw DICOMs;
-                      will read prepped artifacts once prep_study exists
+                      laterality resolution + census, decode/normalize; also owns
+                      StudyDecodeError and the slice-header read both dataset.py and
+                      prep.py need (kept here to avoid a circular import)
+  prep.py            [done] normalize_series, pad-to-square, mirror_to_canonical +
+                      mirrors_in_plane (only Axial/Coronal flip), JPEG-in-.npz storage with
+                      selective decode, and the pure prep_study orchestrator
+  dataset.py         [done] KneeStudyDataset over raw DICOMs (Phase 1 shape) and
+                      PreppedStudyDataset over the Phase 2 .npz artifacts, same contract
   model.py           [done, Phase 1 shape] single backbone + mean-pool over slices;
                       slice/series attention is a later Phase 5 upgrade
   train.py           [done] masked BCE, fold assignment, one epoch, evaluate, experiment logging --
@@ -71,6 +104,12 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
   phase1-submit/        the actual scored submission notebook (offline, loads the trained checkpoint)
   phase2-laterality-census/  corpus-wide laterality/slice-count census, CPU-only
   phase2-laterality-verify/  multi-instance follow-up confirming the census's unknown rate is real
+  phase2-prep/         the pilot: PILOT_N studies stride-sampled across the corpus plus every
+                        gold study; carries the four blocking gates
+  phase2-prep-shard0..3/  the full-corpus run, one kernel per shard index range -- identical
+                        code, differing only in SHARD_INDEX, so a lost shard re-runs alone
+  phase2-prep-consume/  consumer kernel that proves the artifact hop and re-counts the corpus
+  phase2-visual-check/  8 studies x 4 series grid, mirrored to canonical -- the human check
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)

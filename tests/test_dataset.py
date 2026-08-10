@@ -4,8 +4,11 @@ import pandas as pd
 import pytest
 import torch
 
-from knee.dataset import CachedDataset, KneeStudyDataset, StudyDecodeError
+import numpy as np
+
+from knee.dataset import CachedDataset, KneeStudyDataset, PreppedStudyDataset, StudyDecodeError
 from knee.infer import LABEL_COLUMNS, build_submission
+from knee.prep import save_study_npz
 
 _SAMPLE_ROOT = Path(__file__).resolve().parents[1] / "data" / "sample"
 _TEST_SERIES_DIR = _SAMPLE_ROOT / "test_series"
@@ -140,6 +143,115 @@ def test_build_submission_still_falls_back_to_0_5_when_dataset_raises_study_deco
     df = build_submission(["broken_study"], predict_fn)
 
     assert (df[LABEL_COLUMNS].to_numpy()[0] == 0.5).all()
+
+
+def _write_prepped_study(npz_root, study_uid, n_series=2, n_slices=4, size=16, side="R",
+                         planes=None):
+    npz_root.mkdir(parents=True, exist_ok=True)
+    series_slices = {
+        f"series-{i}": [
+            np.random.randint(0, 255, (size, size), dtype=np.uint8) for _ in range(n_slices)
+        ]
+        for i in range(n_series)
+    }
+    planes = planes or ["Coronal"] * n_series
+    meta = {
+        "StudyInstanceUID": study_uid,
+        "side": side,
+        "route": "Laterality",
+        "is_gold": False,
+        "series": {
+            f"series-{i}": {"Anatomical_Plane": planes[i]} for i in range(n_series)
+        },
+    }
+    save_study_npz(npz_root / f"{study_uid}.npz", series_slices, meta)
+    return series_slices
+
+
+def test_prepped_dataset_returns_the_same_tensor_contract_as_the_raw_dataset(tmp_path):
+    _write_prepped_study(tmp_path, "study-a", n_series=2, n_slices=4, size=16)
+
+    dataset = PreppedStudyDataset(["study-a"], tmp_path, n_slices=4, max_series=4)
+    image, labels, returned_uid = dataset[0]
+
+    assert image.shape == (16, 3, 16, 16)  # max_series * n_slices, padded on both axes
+    assert image.dtype == torch.float32
+    assert image.min() >= 0.0 and image.max() <= 1.0
+    assert returned_uid == "study-a"
+    assert labels is None
+    # the three channels are an expanded view, so they must still read as three
+    # identical copies of the grayscale slice
+    assert torch.equal(image[:, 0], image[:, 2])
+
+
+def test_prepped_dataset_pads_short_series_by_repeating_the_last_slice(tmp_path):
+    # artifacts store the true slice count (census p0 = 11, below K=24), so
+    # padding has to happen here rather than being baked into the .npz
+    _write_prepped_study(tmp_path, "short", n_series=1, n_slices=3, size=8)
+
+    dataset = PreppedStudyDataset(["short"], tmp_path, n_slices=6, max_series=1)
+    image, _, _ = dataset[0]
+
+    assert image.shape == (6, 3, 8, 8)
+    assert torch.equal(image[3], image[5])  # the repeated tail
+
+
+def test_prepped_dataset_mirrors_left_studies_and_leaves_right_ones_alone(tmp_path):
+    # np.fliplr returns a negative-stride view that torch.from_numpy rejects,
+    # so this also checks the flip survives the stack into a tensor at all
+    stored = _write_prepped_study(tmp_path, "left", n_series=1, n_slices=1, size=8, side="L")
+    _write_prepped_study(tmp_path, "right", n_series=1, n_slices=1, size=8, side="R")
+
+    left_image, _, _ = PreppedStudyDataset(["left"], tmp_path, n_slices=1, max_series=1)[0]
+    right_image, _, _ = PreppedStudyDataset(["right"], tmp_path, n_slices=1, max_series=1)[0]
+
+    original = stored["series-0"][0]
+    flipped = torch.from_numpy(np.fliplr(original).copy().astype(np.float32) / 255.0)
+    # JPEG q=92 is lossy, so compare within a tolerance rather than exactly
+    assert (left_image[0, 0] - flipped).abs().mean() < 8 / 255.0
+    assert not torch.equal(left_image, right_image)
+
+
+def test_prepped_dataset_does_not_flip_sagittal_series(tmp_path):
+    # A sagittal image's horizontal axis is anterior-posterior (row direction
+    # runs along patient +y), not medial-lateral -- flipping one mirrors the
+    # knee front-to-back rather than swapping sides. Only Axial/Coronal (row
+    # direction along +x) can be laterality-canonicalized in plane. Caught by
+    # the Phase 2 visual check; artifacts store unmirrored pixels, so the fix
+    # was loader-only.
+    stored = _write_prepped_study(
+        tmp_path, "left", n_series=2, n_slices=1, size=8, side="L",
+        planes=["Sagittal", "Coronal"],
+    )
+
+    image, _, _ = PreppedStudyDataset(["left"], tmp_path, n_slices=1, max_series=2)[0]
+
+    tol = 8 / 255.0  # JPEG q=92 is lossy
+    sagittal = torch.from_numpy(stored["series-0"][0].astype(np.float32) / 255.0)
+    coronal = torch.from_numpy(np.fliplr(stored["series-1"][0]).copy().astype(np.float32) / 255.0)
+
+    assert (image[0, 0] - sagittal).abs().mean() < tol  # sagittal: unflipped
+    assert (image[1, 0] - coronal).abs().mean() < tol  # coronal: flipped
+
+
+def test_prepped_dataset_raises_study_decode_error_when_the_artifact_is_missing(tmp_path):
+    dataset = PreppedStudyDataset(["never-prepped"], tmp_path)
+
+    with pytest.raises(StudyDecodeError):
+        dataset[0]
+
+
+def test_prepped_dataset_returns_nan_labels_when_study_missing_from_labels_df(tmp_path):
+    _write_prepped_study(tmp_path, "study-a", n_series=1, n_slices=2, size=8)
+    labels_df = pd.DataFrame(
+        [["some_other_study"] + [1.0] * len(LABEL_COLUMNS)],
+        columns=["StudyInstanceUID"] + LABEL_COLUMNS,
+    )
+
+    dataset = PreppedStudyDataset(["study-a"], tmp_path, labels_df=labels_df, n_slices=2)
+    _, labels, _ = dataset[0]
+
+    assert torch.isnan(labels).all()
 
 
 class _CountingBaseDataset:
