@@ -7,6 +7,7 @@ from PIL import Image
 
 from knee.dicom import (
     StudyDecodeError,
+    _SERIES_PRIORITY,
     _read_slice_header,
     census_study_laterality,
     order_slices,
@@ -266,6 +267,22 @@ def save_study_npz(path: str | Path, series_slices: dict[str, list[np.ndarray]],
     np.savez(path, payload=np.array({"series": encoded, "meta": meta}, dtype=object))
 
 
+def _priority_rank(series_uid: str, series_meta: dict) -> tuple:
+    """Sort key reproducing knee.dicom._SERIES_PRIORITY's order (sagittal-
+    fluid-sensitive first) over series already stored in a study's .npz. A
+    series whose stored dict key doesn't match any priority entry -- no
+    per-series meta was recorded, or its plane/fluid-sensitive combination
+    isn't one of the four ranked ones -- sorts after every ranked series, tied
+    on the UID itself for a deterministic order rather than an unstable one."""
+    entry = series_meta.get(series_uid, {})
+    key = (entry.get("Anatomical_Plane"), entry.get("Fluid_Sensitive"))
+    try:
+        rank = _SERIES_PRIORITY.index(key)
+    except ValueError:
+        rank = len(_SERIES_PRIORITY)
+    return (rank, series_uid)
+
+
 def load_study_npz(
     path: str | Path,
     max_series: int | None = None,
@@ -278,14 +295,20 @@ def load_study_npz(
     and a caller that only wants 2 series x 16 slices should not pay to decode
     4 x 24 and discard most of it -- that is the efficiency-track submission's
     shape, and the pilot measured the difference as roughly linear in blobs
-    decoded. Series are limited in sorted-UID order, matching the order
-    PreppedStudyDataset assembles them in, so the two agree on which series
-    "the first two" means."""
+    decoded. Series are limited by the same _SERIES_PRIORITY order prep_study
+    used to pick them (sagittal-fluid-sensitive first) -- stored series live in
+    a plain dict keyed by SeriesInstanceUID, so without this a max_series=1
+    read would return whichever series happens to sort first alphabetically,
+    not the one Phase 1's single-series config actually trained on. The
+    returned dict preserves this order, so PreppedStudyDataset can iterate it
+    directly instead of re-deriving the order itself."""
     data = np.load(path, allow_pickle=True)
     payload = data["payload"].item()
 
     stored = payload["series"]
-    wanted = sorted(stored) if max_series is None else sorted(stored)[:max_series]
+    series_meta = payload["meta"].get("series", {})
+    ordered = sorted(stored, key=lambda uid: _priority_rank(uid, series_meta))
+    wanted = ordered if max_series is None else ordered[:max_series]
     series_slices = {
         series_uid: [_decode_jpeg(blob) for blob in stored[series_uid][:max_slices]]
         for series_uid in wanted

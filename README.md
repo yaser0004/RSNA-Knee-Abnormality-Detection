@@ -9,7 +9,8 @@ Full strategy lives in the plan document (not tracked in this repo); empirical f
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
 kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1 baseline
 complete — trained, submitted, and scored on the real leaderboard; Phase 2 (preprocessing) gate
-closed — all 4,407 studies prepped and verified.**
+closed — all 4,407 studies prepped and verified; Phase 3 (report → labels) in progress — prompt
+builder and scorer written and tested, model bake-off queued on Kaggle.**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
@@ -57,7 +58,29 @@ by design, this was a loader-only fix — no re-prep. Sagittal laterality is sti
 (it would require reversing slice order, a Phase 4/5 modelling decision). Full measured numbers and
 the reasoning behind each decision are in `NOTES.md` (2026-08-09 and 2026-08-10).
 
-Core library (`src/knee/`) covered by tests (96; 94 run without a GPU-capable box — the two
+Phase 3 attacks the actual bottleneck: the LB score decomposes as `0.558 = (4 × 0.674 + 8 × 0.500) / 12`,
+because 8 of the 12 label columns have no training target at all (`reports.py` had lexical rules for
+only 4). No image-side work can move a column with no label, so an open-weight LLM reads all 4,407
+radiology reports against the host's own rubric to produce soft pseudo-labels for all 12 findings.
+Competition rules §2.4.b.1 forbids sending report text to hosted APIs, so the model runs *inside* a
+Kaggle GPU notebook; the rubric is transcribed verbatim in `notebooks/phase3-labels/rubric_733343.md`.
+
+The prompt asks one single-token yes/no question per label, carrying **only that label's rubric
+criterion** (not the whole 12-definition rubric), and reads the score from the Yes/No logits at the
+single answer position — no JSON parsing, and `null`/silent stays NaN rather than becoming a negative.
+An earlier version prepended the entire rubric to all 12 questions, which cost ~1,495 tokens/prompt
+and appeared to require vLLM's prefix caching; that dependency then failed twice on a CUDA-variant
+mismatch. Per-criterion prompts measure **389 tokens** (median report), need no prefix cache, and run
+on the `transformers` already in the Kaggle image — no install step to fail. See `NOTES.md`
+(2026-08-17) for the full post-mortem and the measured token table.
+
+Scoring lives behind a `generate_fn` seam (`score_from_top_logprobs`, `score_report_with_llm`) and is
+tested against a fake, which is why swapping the entire inference engine changed neither those
+functions nor their tests. `notebooks/phase3-probe/` is a CPU-only kernel (no GPU quota) that
+establishes environment facts before any GPU spend; `notebooks/phase3-labels/` runs the model
+bake-off, selecting a generator by measured gold AUC rather than by name.
+
+Core library (`src/knee/`) covered by tests (108; 106 run without a GPU-capable box — the two
 `test_model.py` cases instantiate a backbone): DICOM series/slice selection, laterality
 resolution (per-header and per-study, with real-world tag-value normalization), pixel decode/
 normalize, per-series normalization, pad-to-square and laterality mirroring, JPEG-in-`.npz` study
@@ -96,7 +119,9 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
   train.py           [done] masked BCE, fold assignment, one epoch, evaluate, experiment logging --
                       used for the real Phase 1 5-fold training run (notebooks/phase1-train/)
   infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback
-  reports.py         [done, EN/ES only] lexical label rules; LLM calibration is Phase 3
+  reports.py         [done] EN/ES lexical rules (kept as a per-label fallback candidate,
+                      not replaced) + the Phase 3 LLM generator: verbatim rubric,
+                      per-label criterion prompts, yes/no-logit soft scoring
   metrics.py         [done] macro AUC, per-label AUC (NaN-safe); bootstrap CI not yet added
 notebooks/           thin Kaggle notebooks: import knee, call one function
   knee-phase1-smoke-test.ipynb  validated end-to-end round trip on real Kaggle infra (internet off)
@@ -110,6 +135,10 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         code, differing only in SHARD_INDEX, so a lost shard re-runs alone
   phase2-prep-consume/  consumer kernel that proves the artifact hop and re-counts the corpus
   phase2-visual-check/  8 studies x 4 series grid, mirrored to canonical -- the human check
+  phase3-probe/        CPU-only environment probe (no GPU quota): installed versions, disk,
+                        measured prompt token counts, per-candidate tokenizer reachability
+  phase3-labels/       rubric_733343.md (the host's rubric, verbatim) + the model bake-off:
+                        candidates scored on the 58 gold reports, winner picked on gold AUC
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
@@ -130,6 +159,18 @@ Three CSVs under `results/`, appended by `train.py`, never hand-edited:
 Plus two one-off Phase 2 census outputs (not part of the experiment-tracking discipline above, not
 appended to): `laterality_census.csv` (per-study route/side/slice-counts across the real corpus) and
 `laterality_verify_sample.csv` (the multi-instance follow-up check).
+
+Two frozen reference files, written once and then read-only — both must stay stable, since a silent
+change to either invalidates every comparison made against them:
+
+- `folds_primary_v2.csv` — `make_folds(all 4,407 train.csv UIDs, n_folds=5, seed=0)`. The earlier
+  `primary_v1` fold set covered only the 2,151 lexically-labeled studies; once training runs on the
+  ~4,349 studies with any label, re-deriving folds would reshuffle nearly every study and make every
+  paired delta meaningless. `baseline.csv` is deliberately **not** re-anchored to `primary_v2` — it
+  records the one actually-submitted Phase 1 run (`primary_v1`, LB 0.558), and a `primary_v2` rerun
+  of that config is a new experiment, not a new baseline.
+- `gold_study_uids.csv` — the 58 studies carrying gold rubric labels (all 12 label columns non-null;
+  all 58 also have report text). Makes the holdout greppable without opening 4,407 archives.
 
 ## Running tests
 

@@ -159,7 +159,10 @@ class PreppedStudyDataset(Dataset):
         side = meta.get("side")
         series_meta = meta.get("series", {})
         blocks = []
-        for series_uid in sorted(series_slices):
+        # load_study_npz already orders series_slices by _SERIES_PRIORITY
+        # (sagittal-fluid-sensitive first) -- iterate as returned rather than
+        # re-sorting by UID, which would undo that order.
+        for series_uid in series_slices:
             # only Axial/Coronal have medial-lateral along the image's horizontal
             # axis; flipping a Sagittal series mirrors anterior-posterior instead
             plane = series_meta.get(series_uid, {}).get("Anatomical_Plane")

@@ -220,9 +220,38 @@ def test_load_study_npz_decodes_only_the_requested_series_and_slices(tmp_path):
 
     loaded, _ = load_study_npz(path, max_series=2, max_slices=3)
 
-    assert sorted(loaded) == ["series-0", "series-1"]  # sorted-UID order, not insertion
+    # no per-series plane/fluid-sensitive meta here, so every series ties on
+    # priority rank and falls back to alphabetical-by-UID order
+    assert sorted(loaded) == ["series-0", "series-1"]
     assert all(len(s) == 3 for s in loaded.values())
     assert loaded["series-1"][0].mean() == pytest.approx(10, abs=8)
+
+
+def test_load_study_npz_orders_series_by_priority_not_alphabetically(tmp_path):
+    # prep_study selects series by _SERIES_PRIORITY (sagittal-fluid-sensitive
+    # first), but once stored they live in a dict keyed by SeriesInstanceUID --
+    # alphabetical order can invert that. A study whose top-priority series
+    # happens to sort last alphabetically must still come back first at
+    # max_series=1, or PreppedStudyDataset(max_series=1) would silently hand
+    # back an arbitrary series instead of the one Phase 1 trained on.
+    series_slices = {
+        "zzz-sagittal-fluid": [np.full((4, 4), 1, dtype=np.uint8)],
+        "aaa-axial-fluid": [np.full((4, 4), 2, dtype=np.uint8)],
+    }
+    meta = {
+        "side": None,
+        "route": "unknown",
+        "series": {
+            "zzz-sagittal-fluid": {"Anatomical_Plane": "Sagittal", "Fluid_Sensitive": 1},
+            "aaa-axial-fluid": {"Anatomical_Plane": "Axial", "Fluid_Sensitive": 1},
+        },
+    }
+    path = tmp_path / "study.npz"
+    save_study_npz(path, series_slices, meta)
+
+    loaded, _ = load_study_npz(path, max_series=1)
+
+    assert set(loaded) == {"zzz-sagittal-fluid"}
 
 
 def test_load_study_npz_limits_larger_than_the_artifact_are_not_an_error(tmp_path):

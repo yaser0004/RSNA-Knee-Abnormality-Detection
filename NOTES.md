@@ -684,3 +684,169 @@ re-run.)
 **Phase 2 gate: closed.** 4,407 artifacts, 6.2 GB, all 58 gold studies, explicit laterality route on
 every study, decode coverage counted with every distinct value accounted for, artifact hop proven at
 full scale, and the visual check reviewed.
+
+## 2026-08-17
+
+### Phase 3 Step 0 — a bug found while re-verifying the Phase 3 plan against current code
+
+Before spending any Kaggle GPU time on Phase 3, re-checked the two prior Phase 3 plan drafts against
+the code as it actually stands post-Phase-2. Found one real bug: `load_study_npz` was limiting
+series with `sorted(stored)[:max_series]` — alphabetical by `SeriesInstanceUID`. `prep_study` picks
+series by `_SERIES_PRIORITY` (sagittal-fluid-sensitive first) before storing them, but once stored
+they live in a plain dict keyed by UID, so that ordering was lost. Harmless at `max_series=4`
+(everything loads regardless of order), but Phase 1's config trains on a *single* series — at
+`max_series=1`, `PreppedStudyDataset` would have silently handed back whichever series sorts first
+alphabetically, not the sagittal-fluid-sensitive one Phase 1 actually trained on. Same failure shape
+as the sagittal-mirroring bug from Phase 2 (a function's real precondition not checked before wiring
+it into a new call path) — never triggered before because nothing had called `max_series=1` against
+real multi-series artifacts until now.
+
+Fixed with a `_priority_rank` sort key in `prep.py` that reconstructs `_SERIES_PRIORITY` order from
+each series' stored `Anatomical_Plane`/`Fluid_Sensitive` meta, falling back to alphabetical-by-UID
+for anything unmatched. `load_study_npz` now returns series in that order, and
+`PreppedStudyDataset._load_image` iterates the dict as returned instead of re-sorting it — no
+re-prep needed, loader-only fix. New test:
+`test_load_study_npz_orders_series_by_priority_not_alphabetically`. 97 tests pass (was 96).
+
+Also written locally (no Kaggle needed): `results/folds_primary_v2.csv` (frozen `make_folds` over
+all 4,407 `train.csv` study UIDs, `n_folds=5, seed=0` — near-even 882/882/881/881/881) and
+`results/gold_study_uids.csv` (the 58 studies where all 12 label columns are non-null; all 58 also
+have non-null `Report` text, so Step 2's gate has no report-availability gap to work around).
+`results/baseline.csv` is deliberately left untouched — it holds the one row that matters, the
+actual scored Phase 1 submission (`primary_v1`, LB 0.558); a `primary_v2` rerun of the same frozen
+config is a new experiment to log later, not a new baseline, since it won't be separately submitted.
+
+**Lexical-vs-gold anchor, and it's noisier than expected.** Ran the existing lexical rules
+(`build_lexical_labels`) against the 58 gold labels directly, masking on both sides (a study where
+the rule found no match has `NaN` in the *prediction*, not just possibly in the target — plain
+`per_label_auc` only masks target NaN, so this needed its own masking):
+
+| label | AUC vs gold | matched | positives |
+|---|---|---|---|
+| ACL | 0.500 | 7 | 6 |
+| Medial Meniscus | 0.500 | 9 | 5 |
+| Effusion | 0.644 | 36 | 20 |
+| Baker's | 0.857 | 11 | 4 |
+
+The two labels with the fewest matches (ACL, Medial Meniscus) land at exactly 0.5 — no ranking
+power — but at n=7 and n=9 matched studies (6 and 5 positives respectively) that is close to the
+noise floor, not necessarily a broken rule; a single flipped pair moves AUC by a lot at this size.
+Macro over the 4 covered labels is 0.625, below the ~0.674 backed out of the LB for the trained
+image model on these same 4 labels — but that 0.674 is a single pooled number over ~390 public-LB
+gold studies, while this 0.625 is an unweighted average of four numbers computed on wildly different
+and much smaller match counts (7 to 36). Treat this as a first noisy read, not yet a usable
+attenuation ratio — Step 2 will have a much larger, less sparse comparison (every gold study gets an
+LLM score for every label, no "rule didn't match" gaps), and that number is the one worth trusting.
+
+**Rubric fetched.** `kaggle competitions topic-messages` (not just the web UI, which is a JS SPA
+WebFetch can't read) pulled thread 733343's host post directly — saved verbatim at
+`notebooks/phase3-labels/rubric_733343.md`, including a mapping table to `LABEL_COLUMNS`. Confirms
+the negative criteria the plan paraphrased from memory were right: mild ACL signal change without
+discontinuity → negative, low-grade MCL sprain → negative, meniscal intrasubstance degeneration not
+reaching the surface → negative, OA needs >50% cartilage-thickness loss over ~1cm, meniscus needs
+surface contact on ≥2 images, and any "on the fence" finding → negative across the board. This is
+public forum content (the host's own rubric post, no patient data), so it's fine to commit.
+Blocking prerequisite for Step 1 is resolved.
+
+### Phase 3 Step 1 — two GPU sessions lost to vLLM, and the prompt bug underneath it
+
+**Session 1: P100.** Kaggle assigned a Tesla P100 (sm_60) despite the notebook requesting GPU. The
+container's torch supports sm_70+, so this was unusable. The explicit capability assertion in cell 1
+caught it in ~8s rather than letting it fail deep inside a CUDA kernel launch. Confirms the
+NOTES.md 2026-08-09 finding: `kaggle kernels push` does not reliably honor an accelerator choice —
+**the T4×2 has to be selected in the notebook editor's own settings, then triggered via "Save
+Version → Save & Run All (Commit)"**. That ritual worked; the second session got T4×2 correctly.
+
+**Session 2: vLLM will not install on the current Kaggle image.** `import vllm` fails with
+`ImportError: libcudart.so.13`. This is an open upstream bug (vllm-project/vllm#43435, #44335):
+`--torch-backend=cu129` selects the CUDA build of *PyTorch* only — vLLM's own precompiled wheel is
+fetched as a cu13 build regardless, and Kaggle's image provides CUDA 12. Retried once via
+`uv pip install vllm --torch-backend=auto` (vLLM's own documented recommendation) with the identical
+result. The remaining workaround is `VLLM_PRECOMPILED_WHEEL_VARIANT` against a nightly index —
+unpinned and unverifiable from here. **Do not spend a third session on vLLM.**
+
+**The real cause was a prompt bug, not a packaging bug.** vLLM was in the design purely for prefix
+caching, and prefix caching was only needed because `build_label_prompt` prepended the *entire*
+`RUBRIC_TEXT` — all 12 label definitions, ~1,400 tokens — to each of a report's 12 questions. So
+one report cost ~12 × 1,800 tokens of prefill, and an inference engine was being recruited to hide
+that. Measured on the real corpus:
+
+| prompt design | chars/prompt (median report) | ≈tokens/prompt | ≈tokens/report (×12) |
+|---|---|---|---|
+| whole rubric per question | 5,433 | ~1,495 | ~17,900 |
+| **per-label criterion only** | 1,785 | ~510 | ~6,100 |
+
+Sending only the criterion for the label being asked about is ~3× cheaper, removes the need for
+prefix caching, and therefore removes vLLM entirely in favour of the `transformers` already in the
+Kaggle image — no install step, so no install failure. It is also the better prompt: the model gets
+the one definition it must apply instead of eleven competing ones as distractors. The rubric's three
+back-referencing criteria ("the same criteria applied to the lateral meniscus") are resolved inline
+so each stands alone; substitution is limited to the structure/compartment name, thresholds
+unchanged. `RUBRIC_TEXT` is retained verbatim as the source record.
+
+**`score_from_top_logprobs`/`score_report_with_llm` did not change at all.** They were written
+against a `generate_fn` seam and tested with a fake, so swapping the entire inference engine
+underneath them touched neither the functions nor their tests — the clearest payoff yet from that
+Phase 2 habit of keeping the pure logic separate from the runtime.
+
+**Verified locally before spending any further quota** (transformers 5.8.0, real Qwen3 tokenizers):
+
+- `enable_thinking=False` is accepted by both Qwen3 tokenizers — and it is **not optional for
+  Qwen3-8B**. Its default template leaves the assistant turn open (`...assistant\n`), so the first
+  generated token would open a `<think>` block and *every* answer would score NaN. With the flag the
+  template pre-fills `<think>\n\n</think>\n\n`, putting the real answer at the first position. The
+  4B-Instruct-2507 variant ignores the flag (already non-thinking). Gemma's template rejects the
+  kwarg entirely, so it is passed inside a `try/except TypeError` rather than assumed either way.
+- "Yes"/"No" encode to exactly one token in every casing tested for both Qwen3 tokenizers. This is a
+  precondition, not a detail: the score is read at a single answer position, so a form spanning two
+  tokens has no logit there and would silently produce no score.
+- `torch_dtype=` still works in transformers 5.8.0 (deprecated in favour of `dtype`, not removed).
+  Kept over `dtype` because Kaggle's image may still be on 4.x, where `dtype` does not exist —
+  `torch_dtype` is the form valid in both.
+
+**Process changes, both aimed at the same failure mode.** A CPU-only probe kernel
+(`notebooks/phase3-probe/`) now runs first: Kaggle CPU notebooks cost no GPU quota, so environment
+facts (installed versions, free disk, measured prompt token counts, whether each candidate's
+tokenizer downloads at all) get established for free instead of being guessed at inside a GPU
+session. And the bake-off writes `bakeoff_results.csv` **after each candidate** rather than once at
+the end, so a failure on candidate 3 can no longer discard candidates 1 and 2.
+
+Candidate list trimmed to Qwen3-4B-Instruct-2507, Qwen3-8B, Gemma-3-12B-IT. **Qwen3-14B-AWQ was
+dropped**: AWQ needs `autoawq` kernels, i.e. exactly the kind of extra install that just cost two
+sessions. It can come back as its own deliberate session if the two Qwen candidates suggest scale
+matters.
+
+**CPU probe results (`notebooks/phase3-probe/`, 2026-08-17).** Cost nothing, and returned three
+things worth having had before either GPU session:
+
+| fact | value |
+|---|---|
+| `transformers` on the Kaggle image | **5.0.0** (had been assumed 4.x) |
+| `accelerate` | 1.13.0 present — `device_map='auto'` across both T4s is available |
+| `/kaggle/working` free | 20.9 GB; `~/.cache` (where HF downloads land) 1.1 TB — weights are not a constraint |
+| both Qwen3 tokenizers | load fine, `enable_thinking` accepted, **all six** Yes/No forms single-token |
+| `google/gemma-3-12b-it` | **401 gated** — no `HF_TOKEN` secret on this account |
+| prompt size, median report | **389 tokens** → 4,668/report → **20.6M tokens** for the full corpus |
+| prompt size, longest report | 1,287 tokens → 15,444/report |
+
+Two changes fall straight out of that. **Gemma is now skipped unless `HF_TOKEN` is actually set** —
+the probe proved it cannot download, so including it would only burn session time on a guaranteed
+401. (To enable it later: accept the license on the model page, then add the token as a Kaggle
+Secret named `HF_TOKEN`.) And **prompts are sorted by token length before batching**: at 389 median
+against 1,287 max, batching in corpus order would pad most batches to roughly 3x the tokens they
+need. Results are scattered back by original index, so ordering never reaches the output.
+
+**Adapter validated locally before the push, not on Kaggle.** A real Qwen3-0.6B download stalled on
+HF rate limiting, so the tensor path was validated against a 2 MB random model instead — legitimate
+here because the tokenizer/template risks were already settled separately against the *real* Qwen3
+tokenizers, leaving only model-independent tensor behaviour to check. Asserted: batched scores equal
+one-at-a-time scores to **0.0 exactly** across prompts spanning 162–370 tokens (a left-padding or
+logit-indexing bug is exactly what breaks that), a 12-label sweep produces 12 distinct in-range
+scores, and every prompt yields a usable Yes/No. Also fixed while there: tokenize with
+`add_special_tokens=False`, since `apply_chat_template` already emits the model's special tokens and
+letting the tokenizer add BOS again would silently double it on Llama-family models.
+
+**The reusable lesson from the whole detour:** the failure was not the CUDA packaging bug, it was
+adopting a heavyweight dependency without asking what in the design was creating the need for it.
+The need was self-inflicted, the prompt fix took minutes, and the dependency disappeared entirely.
+Ask what a dependency is compensating for before installing it.
