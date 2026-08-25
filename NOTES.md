@@ -897,3 +897,41 @@ Fixed-size batching also replaced with **token-budget batching** (16,384 padded 
 on the long end. An OOM now halves the batch and retries rather than killing the candidate outright.
 Validated locally over 200 random length distributions (no prompt lost or duplicated, budget and cap
 respected, an oversized single prompt still forms its own batch rather than looping).
+
+### Bake-off run 2 (2026-08-25) — harness fix confirmed; 4B wins on the pre-registered tie-break
+
+Both candidates re-scored under the corrected harness, T4x2, 696 prompts each, **100% answer rate
+for both**, zero OOM retries (the `logits_to_keep=1` fix resolved the 8B's run-1 death — it was
+never too big, it was building a 4.49 GB tensor and discarding it):
+
+| candidate | gold macro AUC | answer rate | elapsed | projected corpus | shards |
+|---|---|---|---|---|---|
+| Qwen3-4B-Instruct-2507 | 0.8613 | 100% | 204s | 3.91h | 1 |
+| Qwen3-8B | **0.8759** | 100% | 406s | 7.78h | 2 |
+
+Per-label (4B / 8B): ACL 0.958/0.973, MCL 0.887/**0.964**, Medial Meniscus **0.915**/0.898,
+Lateral Meniscus 0.866/0.871, Medial OA 0.926/0.938, Lateral OA 0.811/**0.872**, PF OA
+**0.832**/0.826, Effusion **0.817**/0.801, Synovitis 0.737/**0.757**, Baker's 0.949/0.954,
+Contusion 0.810/0.808, Fracture 0.826/**0.849**.
+
+- **The gap (+0.0146) sits inside the pre-registered NEAR_TIE=0.02 band, so the harness took the
+  faster model (4B)** — that rule was set before seeing any numbers precisely so it couldn't be
+  re-litigated after. At n=58 a 0.015 macro gap is not distinguishable from noise.
+- **But the 8B's improvement is not uniform noise either**: 8 of 12 labels improved, and the four
+  biggest gains (MCL +0.077 on 9 positives, Lateral OA +0.061 on 11, Fracture +0.022 on 18,
+  ACL +0.015 on 24) concentrate exactly where positives are scarcest — consistent with more
+  capacity helping most on the hardest-to-call criteria, though with n this small each individual
+  gain is also the easiest to flip by chance.
+- **The two models genuinely disagree per-report while agreeing on ranking**: score matrices
+  differ by mean abs delta 0.069, p95 0.84, max 1.00 — yet macro AUCs land 0.015 apart. The soft
+  scores are far less stable across model scale than their downstream AUCs suggest.
+- **Reproducibility across harness changes is good at the macro level**: run-1 4B (fixed batch 8)
+  vs run-2 4B (token-budget batching) moved macro 0.8618→0.8613 (delta 0.0005); worst single label
+  PF OA moved 0.8282→0.8320 (delta 0.0038). fp16 batching numerics shift individual scores but not
+  conclusions.
+- Raw artifacts kept for Phase 4 calibration analysis without another GPU session:
+  `results/bakeoff.csv` (full metrics row per candidate) and `results/bakeoff_scores/`
+  ({scores,weights}_{candidate}.npy, 58x12 soft-label matrices from each model).
+- Cost framing for the Step 1b decision the run leaves open: 4B labels the corpus in one <=4h
+  session; 8B needs two (~7.8h total GPU). This is a one-time spend either way — the labels then
+  feed every later experiment for free.

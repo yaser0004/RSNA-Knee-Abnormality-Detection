@@ -9,10 +9,10 @@ Full strategy lives in the plan document (not tracked in this repo); empirical f
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
 kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1 baseline
 complete — trained, submitted, and scored on the real leaderboard; Phase 2 (preprocessing) gate
-closed — all 4,407 studies prepped and verified; Phase 3 (report → labels) bake-off running —
-Qwen3-4B-Instruct scored 0.8618 macro gold AUC against a 0.625 lexical anchor (run 1), run 2 re-scores
-all candidates under the fixed harness (logits_to_keep OOM fix, token-budget batching) before the
-winner labels the full corpus.**
+closed — all 4,407 studies prepped and verified; Phase 3 (report → labels) bake-off complete —
+Qwen3-4B-Instruct wins on the pre-registered near-tie rule (0.8613 vs Qwen3-8B's 0.8759, a
+within-noise gap at n=58, both clearing the 0.625 lexical anchor by +0.24); next is Step 1b, the
+full-corpus pseudo-labeling pass.**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
@@ -80,12 +80,12 @@ Scoring lives behind a `generate_fn` seam (`score_from_top_logprobs`, `score_rep
 tested against a fake, which is why swapping the entire inference engine changed neither those
 functions nor their tests. `notebooks/phase3-probe/` is a CPU-only kernel (no GPU quota) that
 establishes environment facts before any GPU spend; `notebooks/phase3-labels/` runs the model
-bake-off, selecting a generator by measured gold AUC rather than by name. Run 1 (Qwen3-4B-Instruct,
-696 prompts, 100% answered) cleared the lexical anchor by +0.237 with every label above 0.73 —
-including the 8 labels that had no lexical rule and were scoring a flat 0.500 on the LB. The 8B OOM
-was diagnosed as full-vocab logits at every position (fixed with `logits_to_keep=1`, verified
-bit-identical); run 2 re-scores both Qwen candidates under the corrected harness before Step 1b
-spends the full-corpus budget.
+bake-off, selecting a generator by measured gold AUC rather than by name. Run 2 (both candidates,
+100% answer rate, zero OOM retries after the `logits_to_keep=1` fix) put Qwen3-8B at 0.8759 and
+Qwen3-4B-Instruct at 0.8613 — a within-noise gap, so the pre-registered near-tie rule took the
+faster 4B, which labels the full corpus in one ~4h session instead of two. Both clear the lexical
+anchor (+0.24), and both score matrices are kept in `results/bakeoff_scores/` for Phase 4
+calibration analysis without another GPU session.
 
 Core library (`src/knee/`) covered by tests (108; 106 run without a GPU-capable box — the two
 `test_model.py` cases instantiate a backbone): DICOM series/slice selection, laterality
@@ -168,7 +168,9 @@ Three CSVs under `results/`, appended by `train.py`, never hand-edited:
 
 Plus two one-off Phase 2 census outputs (not part of the experiment-tracking discipline above, not
 appended to): `laterality_census.csv` (per-study route/side/slice-counts across the real corpus) and
-`laterality_verify_sample.csv` (the multi-instance follow-up check).
+`laterality_verify_sample.csv` (the multi-instance follow-up check). Plus the Phase 3 bake-off
+record: `bakeoff.csv` (one row per candidate, full precision) and `bakeoff_scores/` (each
+candidate's 58×12 soft-label matrix and confidence weights over the gold reports).
 
 Two frozen reference files, written once and then read-only — both must stay stable, since a silent
 change to either invalidates every comparison made against them:
