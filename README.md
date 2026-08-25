@@ -9,8 +9,10 @@ Full strategy lives in the plan document (not tracked in this repo); empirical f
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
 kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1 baseline
 complete — trained, submitted, and scored on the real leaderboard; Phase 2 (preprocessing) gate
-closed — all 4,407 studies prepped and verified; Phase 3 (report → labels) in progress — prompt
-builder and scorer written and tested, model bake-off queued on Kaggle.**
+closed — all 4,407 studies prepped and verified; Phase 3 (report → labels) bake-off running —
+Qwen3-4B-Instruct scored 0.8618 macro gold AUC against a 0.625 lexical anchor (run 1), run 2 re-scores
+all candidates under the fixed harness (logits_to_keep OOM fix, token-budget batching) before the
+winner labels the full corpus.**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
@@ -78,7 +80,12 @@ Scoring lives behind a `generate_fn` seam (`score_from_top_logprobs`, `score_rep
 tested against a fake, which is why swapping the entire inference engine changed neither those
 functions nor their tests. `notebooks/phase3-probe/` is a CPU-only kernel (no GPU quota) that
 establishes environment facts before any GPU spend; `notebooks/phase3-labels/` runs the model
-bake-off, selecting a generator by measured gold AUC rather than by name.
+bake-off, selecting a generator by measured gold AUC rather than by name. Run 1 (Qwen3-4B-Instruct,
+696 prompts, 100% answered) cleared the lexical anchor by +0.237 with every label above 0.73 —
+including the 8 labels that had no lexical rule and were scoring a flat 0.500 on the LB. The 8B OOM
+was diagnosed as full-vocab logits at every position (fixed with `logits_to_keep=1`, verified
+bit-identical); run 2 re-scores both Qwen candidates under the corrected harness before Step 1b
+spends the full-corpus budget.
 
 Core library (`src/knee/`) covered by tests (108; 106 run without a GPU-capable box — the two
 `test_model.py` cases instantiate a backbone): DICOM series/slice selection, laterality
@@ -117,7 +124,10 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
   model.py           [done, Phase 1 shape] single backbone + mean-pool over slices;
                       slice/series attention is a later Phase 5 upgrade
   train.py           [done] masked BCE, fold assignment, one epoch, evaluate, experiment logging --
-                      used for the real Phase 1 5-fold training run (notebooks/phase1-train/)
+                       used for the real Phase 1 5-fold training run (notebooks/phase1-train/);
+                       also Timer (accumulating wall-clock stopwatch feeding train_minutes),
+                       load_gold_holdout + train_val_split (Phase 4's explicit gold exclusion --
+                       Phase 1 trained on 36 of the 58 gold studies by accident)
   infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback
   reports.py         [done] EN/ES lexical rules (kept as a per-label fallback candidate,
                       not replaced) + the Phase 3 LLM generator: verbatim rubric,

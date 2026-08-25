@@ -1,5 +1,6 @@
 import datetime
 import random
+import time
 from pathlib import Path
 
 import numpy as np
@@ -47,6 +48,63 @@ def make_folds(study_uids: list[str], n_folds: int = 5, seed: int = 0) -> dict[s
     shuffled = sorted_uids.copy()
     rng.shuffle(shuffled)
     return {uid: i % n_folds for i, uid in enumerate(shuffled)}
+
+
+class Timer:
+    """Accumulating wall-clock stopwatch for experiment logging. Each with-block
+    adds to the running total, so timing N epochs is N enter/exit pairs and
+    train_minutes comes straight off .minutes at log_experiment time. The Phase 1
+    run logged 0.0 into that column for every fold because this timing was
+    hand-rolled in the notebook and never wired up (see NOTES.md 2026-08-08)."""
+
+    def __init__(self):
+        self.total_seconds = 0.0
+        self._start: float | None = None
+
+    def __enter__(self) -> "Timer":
+        self._start = time.perf_counter()
+        return self
+
+    def __exit__(self, *exc) -> bool:
+        self.total_seconds += time.perf_counter() - self._start
+        self._start = None
+        return False
+
+    @property
+    def minutes(self) -> float:
+        return self.total_seconds / 60.0
+
+
+def load_gold_holdout(csv_path: str | Path) -> frozenset[str]:
+    """The studies carrying gold rubric labels (results/gold_study_uids.csv, one
+    StudyInstanceUID per row). Phase 4+ must never train on these -- Phase 1 did,
+    silently, which is why its gold-LOO gate had to be substituted with the LB
+    back-out (see NOTES.md 2026-08-08). Loading them as one explicit set makes the
+    exclusion a single greppable call instead of a pandas filter each notebook
+    re-derives with its own chance to get it wrong."""
+    uids = pd.read_csv(csv_path)["StudyInstanceUID"].astype(str)
+    if len(uids) == 0:
+        raise ValueError(f"{csv_path} lists no gold studies -- an empty holdout would "
+                         "silently disable the exclusion")
+    return frozenset(uids)
+
+
+def train_val_split(
+    folds: dict[str, int],
+    val_fold: int,
+    exclude_uids: frozenset[str] | set[str] = frozenset(),
+) -> tuple[list[str], list[str]]:
+    """Train/val UID lists for one fold over the frozen assignment. Excluded
+    studies (the gold holdout) are dropped from BOTH lists: never trained on, and
+    not silently mixed into an OOF score whose job is to measure pseudo-label
+    transfer on non-gold studies -- the caller scores them separately against
+    their real rubric labels."""
+    train, val = [], []
+    for uid, fold in sorted(folds.items()):
+        if uid in exclude_uids:
+            continue
+        (val if fold == val_fold else train).append(uid)
+    return train, val
 
 
 def log_experiment(

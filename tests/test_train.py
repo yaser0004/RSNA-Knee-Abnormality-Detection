@@ -6,9 +6,19 @@ from torch.utils.data import Dataset
 
 from knee.infer import LABEL_COLUMNS
 from knee.model import KneeModel
-from knee.train import evaluate, log_experiment, make_folds, masked_bce_loss, train_one_epoch
+from knee.train import (
+    Timer,
+    evaluate,
+    load_gold_holdout,
+    log_experiment,
+    make_folds,
+    masked_bce_loss,
+    train_one_epoch,
+    train_val_split,
+)
 
 _REAL_EXPERIMENTS_CSV = Path(__file__).resolve().parents[1] / "results" / "experiments.csv"
+_REAL_GOLD_CSV = Path(__file__).resolve().parents[1] / "results" / "gold_study_uids.csv"
 
 
 class _TinySyntheticDataset(Dataset):
@@ -161,6 +171,77 @@ def test_log_experiment_appends_without_duplicating_header_on_second_call(tmp_pa
     df = pd.read_csv(csv_path)
     assert len(df) == 2
     assert list(df["git_sha"]) == ["sha0", "sha1"]
+
+
+def test_timer_accumulates_across_blocks_and_reports_minutes():
+    import time
+
+    timer = Timer()
+    with timer:
+        time.sleep(0.02)
+    first = timer.total_seconds
+    with timer:
+        time.sleep(0.02)
+    second_block = timer.total_seconds - first
+
+    assert 0.01 < first < 1.0
+    assert 0.01 < second_block < 1.0
+    assert abs(timer.minutes - timer.total_seconds / 60.0) < 1e-12
+
+
+def test_load_gold_holdout_reads_the_real_frozen_file():
+    holdout = load_gold_holdout(_REAL_GOLD_CSV)
+
+    assert len(holdout) == 58
+    assert all(isinstance(u, str) and u.startswith("1.2.826.") for u in holdout)
+
+
+def test_load_gold_holdout_rejects_an_empty_file(tmp_path):
+    csv_path = tmp_path / "gold.csv"
+    pd.DataFrame({"StudyInstanceUID": []}).to_csv(csv_path, index=False)
+
+    try:
+        load_gold_holdout(csv_path)
+        assert False, "expected ValueError for an empty gold file"
+    except ValueError:
+        pass
+
+
+def test_load_gold_holdout_keeps_uids_as_strings_even_if_numeric_looking(tmp_path):
+    # a UID that looks numeric must not become an int and silently stop matching
+    # the string keys in the folds dict -- that would disable the exclusion
+    csv_path = tmp_path / "gold.csv"
+    pd.DataFrame({"StudyInstanceUID": ["12345", "1.2.826.x"]}).to_csv(csv_path, index=False)
+
+    assert load_gold_holdout(csv_path) == frozenset({"12345", "1.2.826.x"})
+
+
+def test_train_val_split_partitions_every_non_excluded_study_exactly_once():
+    folds = make_folds([f"study{i}" for i in range(50)], n_folds=5, seed=0)
+    exclude = frozenset({"study0", "study7"})
+
+    train, val = train_val_split(folds, val_fold=2, exclude_uids=exclude)
+
+    assert set(train) | set(val) == set(folds) - exclude
+    assert not set(train) & set(val)
+    assert all(folds[u] != 2 for u in train)
+    assert all(folds[u] == 2 for u in val)
+
+
+def test_train_val_split_drops_excluded_studies_from_both_sides():
+    folds = {"a": 0, "b": 0, "c": 1, "d": 1}
+
+    train, val = train_val_split(folds, val_fold=1, exclude_uids=frozenset({"c"}))
+
+    assert set(train) == {"a", "b"}
+    assert set(val) == {"d"}
+    assert "c" not in train and "c" not in val
+
+
+def test_train_val_split_is_deterministic():
+    folds = make_folds([f"study{i}" for i in range(50)], n_folds=5, seed=0)
+
+    assert (train_val_split(folds, 3) == train_val_split(folds, 3))
 
 
 def test_train_one_epoch_returns_finite_loss_and_updates_weights():
