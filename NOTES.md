@@ -850,3 +850,50 @@ letting the tokenizer add BOS again would silently double it on Llama-family mod
 adopting a heavyweight dependency without asking what in the design was creating the need for it.
 The need was self-inflicted, the prompt fix took minutes, and the dependency disappeared entirely.
 Ask what a dependency is compensating for before installing it.
+
+### Bake-off run 1 (2026-08-17) — the weak-supervision thesis holds
+
+Qwen3-4B-Instruct-2507 over the 58 gold reports, 696 prompts, **100% answer rate** (696/696 got a
+usable Yes/No — the `enable_thinking` handling is correct):
+
+| label | gold AUC | positives | | label | gold AUC | positives |
+|---|---|---|---|---|---|---|
+| ACL | 0.9571 | 24/58 | | PF OA | 0.8282 | 21/58 |
+| MCL | 0.8866 | 9/58 | | Effusion | 0.8174 | 35/58 |
+| Medial Meniscus | 0.9147 | 26/58 | | Synovitis | 0.7372 | 27/58 |
+| Lateral Meniscus | 0.8671 | 23/58 | | Baker's | 0.9529 | 12/58 |
+| Medial OA | 0.9271 | 15/58 | | Contusion | 0.8124 | 19/58 |
+| Lateral OA | 0.8124 | 11/58 | | Fracture | 0.8292 | 18/58 |
+
+**Macro 0.8618 against a lexical anchor of 0.6252 — margin +0.2366.** Every label clears 0.73, and
+critically the **eight labels that had no lexical rule at all** — the ones contributing a flat 0.500
+each to the 0.558 LB score — now carry real signal (MCL 0.887, Lateral Meniscus 0.867, Medial OA
+0.927, Lateral OA 0.812, PF OA 0.828, Synovitis 0.737, Contusion 0.812, Fracture 0.829). Synovitis
+is weakest, which matches the plan's prediction that the rubric's thresholds are least reflected in
+report prose there. Caveat that does not go away: n=58, and MCL rests on 9 positives, so treat these
+as directional, not precise.
+
+**Qwen3-8B OOMed, and it was my bug, not the model's size.** `model(**enc).logits` materialises
+logits at *every* position: batch 8 × seq 1849 × 151,936 vocab in fp16 is **4.49 GB**, which is
+exactly the "Tried to allocate 4.03 GiB" in the traceback. Only the last position is ever read.
+`logits_to_keep=1` reduces that tensor to **2.4 MB** — verified locally that the answer-position
+logits are bit-identical either way (max delta 6e-08). The 8B was never too big for two T4s; it was
+being asked to build a 4.5 GB tensor and discard 99.95% of it.
+
+**Two further corrections to the run-1 harness:**
+
+- **The "NO CANDIDATE FITS" verdict was wrong, not just unlucky.** It fired because the 4B's
+  projected full-corpus time (4.79h) exceeded a 4h *session* budget — but this project already
+  shards long jobs by index range (Phase 2 prepped 4,407 studies across 4 kernels). Runtime beyond
+  one session is a scheduling detail, not a disqualification. Eligibility is now "it ran and
+  answered ≥90% of questions"; shard count is reported instead of used as a veto.
+- **The projection was also inflated.** It extrapolated per-report time from the gold subset, but
+  gold reports are longer than corpus average — measured locally with the real tokenizer, 6,619 vs
+  6,003 tokens per report across all 12 prompts (n=400 sample). Scaling by tokens rather than report
+  count gives 4.34h, not 4.79h.
+
+Fixed-size batching also replaced with **token-budget batching** (16,384 padded tokens/batch, cap
+64): prompts span 157–1,845 tokens, so a fixed count of 8 idled the GPU on the short end and OOMed
+on the long end. An OOM now halves the batch and retries rather than killing the candidate outright.
+Validated locally over 200 random length distributions (no prompt lost or duplicated, budget and cap
+respected, an oversized single prompt still forms its own batch rather than looping).
