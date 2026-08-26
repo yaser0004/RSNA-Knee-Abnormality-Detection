@@ -1,0 +1,12 @@
+{
+  "n_studies": 4407,
+  "n_labels": 12,
+  "shards_stitched": [
+    "knee-phase3-label-shard0",
+    "knee-phase3-label-shard1"
+  ],
+  "partition_check": "exact (no dup/missing/unexpected)",
+  "value_range_check": "pass",
+  "gold_crosscheck_max_abs_delta": 0.16333133888946821,
+  "gold_macro_auc_recomputed": 0.8616059513198778
+}

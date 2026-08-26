@@ -9,10 +9,10 @@ Full strategy lives in the plan document (not tracked in this repo); empirical f
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
 kept separate from the plan so the plan stays a stable strategy reference. Status: **Phase 1 baseline
 complete — trained, submitted, and scored on the real leaderboard; Phase 2 (preprocessing) gate
-closed — all 4,407 studies prepped and verified; Phase 3 (report → labels) bake-off complete —
-Qwen3-4B-Instruct wins on the pre-registered near-tie rule (0.8613 vs Qwen3-8B's 0.8759, a
-within-noise gap at n=58, both clearing the 0.625 lexical anchor by +0.24); next is Step 1b, the
-full-corpus pseudo-labeling pass.**
+closed — all 4,407 studies prepped and verified; Phase 3 gate closed — Qwen3-4B-Instruct won the
+bake-off (gold macro AUC 0.8613 vs 0.625 lexical anchor) and labeled the full corpus
+(`results/pseudo_labels_qwen3_4b.csv`, 52,884/52,884 answered, all consumer gates passed). Next:
+Phase 4, training on LLM pseudo-labels with the 58 gold studies held out.**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
@@ -149,6 +149,10 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         measured prompt token counts, per-candidate tokenizer reachability
   phase3-labels/       rubric_733343.md (the host's rubric, verbatim) + the model bake-off:
                         candidates scored on the 58 gold reports, winner picked on gold AUC
+  phase3-label-shard0..1/  full-corpus labeling with the bake-off winner: contiguous UID ranges,
+                        incremental saves, per-shard completion sentinel
+  phase3-label-consume/  CPU stitch+verify kernel: exact partition, value sanity, gold cross-check
+                        vs the attached bake-off output, macro AUC recheck -> pseudo_labels CSV
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
@@ -169,8 +173,10 @@ Three CSVs under `results/`, appended by `train.py`, never hand-edited:
 Plus two one-off Phase 2 census outputs (not part of the experiment-tracking discipline above, not
 appended to): `laterality_census.csv` (per-study route/side/slice-counts across the real corpus) and
 `laterality_verify_sample.csv` (the multi-instance follow-up check). Plus the Phase 3 bake-off
-record: `bakeoff.csv` (one row per candidate, full precision) and `bakeoff_scores/` (each
-candidate's 58×12 soft-label matrix and confidence weights over the gold reports).
+record: `bakeoff.csv` (one row per candidate, full precision), `bakeoff_scores/` (each candidate's
+58×12 soft-label matrix and confidence weights over the gold reports), and the Phase 3 output
+`pseudo_labels_qwen3_4b.csv` + `verification_manifest.json` (all 4,407 studies' soft labels — the
+Phase 4 training target).
 
 Two frozen reference files, written once and then read-only — both must stay stable, since a silent
 change to either invalidates every comparison made against them:
