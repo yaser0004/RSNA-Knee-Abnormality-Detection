@@ -1,0 +1,22 @@
+{
+ "id": "mohammadyaserhussain/knee-phase3-label-consume",
+ "title": "knee-phase3-label-consume",
+ "code_file": "knee-phase3-label-consume.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "false",
+ "enable_tpu": "false",
+ "enable_internet": "false",
+ "machine_shape": "",
+ "dataset_sources": [],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [
+  "mohammadyaserhussain/knee-phase3-bakeoff",
+  "mohammadyaserhussain/knee-phase3-label-shard0",
+  "mohammadyaserhussain/knee-phase3-label-shard1"
+ ],
+ "model_sources": []
+}
