@@ -935,3 +935,33 @@ Contusion 0.810/0.808, Fracture 0.826/**0.849**.
 - Cost framing for the Step 1b decision the run leaves open: 4B labels the corpus in one <=4h
   session; 8B needs two (~7.8h total GPU). This is a one-time spend either way — the labels then
   feed every later experiment for free.
+
+### Step 1b — full corpus labeled and verified (2026-08-26)
+
+Qwen3-4B-Instruct-2507 scored all 4,407 studies x 12 labels (52,884 prompts) across two parallel
+T4x2 shard kernels, ~115 min each, **100% answer rate (52,884/52,884), zero OOM retries**. The
+shard design copied Phase 2's exactly: contiguous UID ranges over the sorted corpus
+([0,2203)/[2203,4407)), incremental CSV saves every 25 batches, a completion sentinel per shard
+that the consumer kernel requires before stitching.
+
+- **The consumer's five gates all passed**: sentinels present; exact partition (no duplicated,
+  missing, or unexpected UIDs across shards); no NaN anywhere, scores and weights inside [0,1];
+  gold cross-check vs the bake-off output mean|delta|=0.00059 (drift gate: 0.02); recomputed gold
+  macro AUC from the stitched file 0.8616 vs recorded 0.8613.
+- **The two-gate cross-check design earned its keep immediately**: max|delta| hit 0.163 on a
+  handful of prompts — fp16 batching numerics flipping knife-edge (score~0.5) cases, precisely as
+  predicted when the gate was split into a strict mean test and a report-only max. A single hard
+  max threshold would have either false-alarmed here or been too loose to catch real prompt drift.
+- **Corpus prevalence corroborates the "gold is enriched 2x" claim independently**: corpus mean
+  score is 0.110 vs the gold set's 0.217 — almost exactly half, matching the public notebook's
+  prevalence-shift warning (NOTES.md 2026-08-08). Any calibration fitted on the gold set must not
+  be assumed to transfer to corpus-wide thresholds unchanged.
+- Per-label corpus means: Medial Meniscus 0.318 and Effusion 0.262 dominate; Fracture 0.014,
+  MCL 0.021, Lateral OA 0.025 are rare. Class imbalance this extreme matters for Phase 4 loss
+  weighting and for how much a rare-label AUC can move at all.
+- Artifacts: `results/pseudo_labels_qwen3_4b.csv` (the Phase 4 label source: StudyInstanceUID +
+  12 score cols + 12 weight cols) and `results/verification_manifest.json`. Shard outputs remain
+  on Kaggle (scores_shard{0,1}.csv + manifests) attached to the consumer kernel via kernel_sources.
+- Process note: CLI `kaggle kernels push` always triggers an auto-run, which has landed on P100
+  essentially every time — GPU kernels now get built and validated locally, then handed to the
+  human for the T4x2 editor ritual; only CPU-only kernels get pushed directly.
