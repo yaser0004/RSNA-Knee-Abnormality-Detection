@@ -1057,3 +1057,44 @@ rows), so the frozen file and the function cannot have drifted apart. Its digest
 `cace8c45733ee7920a442fa4ae3f1db4a0d76401504e4729b49562d5eab52047` over sorted `uid,fold` lines — is
 now asserted in the Phase 5 notebook. Run 1 asserted fold *sizes* (`[881,881,881,882,882]`), which
 hold for any seed and would not have caught a reshuffle.
+
+### The P100 problem was a metadata bug, not a Kaggle policy (2026-09-02)
+
+Every previous `kaggle kernels push` landed on a Tesla P100 (sm_60, unusable — the container's torch
+is sm_70+), which is why the project adopted a rule of never CLI-pushing a GPU kernel and instead
+hand-triggering every run from the editor. **The cause was in our own metadata.** Kaggle's kernel
+metadata carries a `machine_shape` field that names the accelerator, the CLI passes it straight
+through (`request.machine_shape = acc if acc else meta_data['machine_shape']`), and every one of our
+`kernel-metadata.json` files had it as the empty string — which means "server picks". The editor
+selection was never being sent at all.
+
+Pulling the metadata of the kernel that *did* get T4 x2 gives the value:
+
+```
+"machine_shape": "NvidiaTeslaT4"     # this is the T4 x2 option, not a single T4
+```
+
+Set on `phase4-submit` and pushed via CLI, the run reported `device: cuda` and completed — a P100
+would have failed the probe and fallen back to CPU. CLI 2.2.4 also exposes it as
+`kaggle kernels push --accelerator NvidiaTeslaT4`, which overrides the metadata.
+
+Two things that came free with it:
+- Kaggle **auto-pinned the new kernel's `docker_image` to the same sha as `phase4-train`**
+  (`gcr.io/kaggle-private-byod/python@sha256:37c64f7d...`), so the checkpoints run in the environment
+  they were trained in without asking. `docker_image` and `docker_image_pinning_type`
+  (`original`/`latest`) are both honoured from metadata if it ever needs forcing.
+- Kaggle accepts **at least 5 notebook inputs** (`phase4-train` has 5). The Phase 5 kernel asks for
+  6; still unverified.
+
+**What stays true:** `kaggle kernels push` always starts a run — the CLI's own help says "Push new
+code to a kernel *and run the kernel*", and there is no draft/no-run flag. Importing through the web
+editor is the only way to get a notebook onto Kaggle without executing it. So the rule changes from
+"never CLI-push a GPU kernel" to "a CLI push always runs, so only push what you mean to run — and
+set `machine_shape` when you do."
+
+**Phase 4 submission run (version 1, T4, 3 visible studies, 0 fallbacks):** prep **2.66 s/study**
+(p95 4.05), forward **0.428 s/study for all five fold models** on GPU — 3.09 s/study end to end, so
+roughly **67 min per 1,000 hidden studies**, prep-bound, well inside the 9 h cap. Mean predictions
+track the training positive rates across all 12 labels and preserve their ordering (Medial Meniscus
+0.268 vs 0.319, Effusion 0.144 vs 0.262, Fracture 0.006 vs 0.014). At n=3 that is a smoke signal,
+not a measurement, but a broken preprocessing path would not produce that shape.

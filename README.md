@@ -13,8 +13,9 @@ closed — all 4,407 studies prepped and verified; Phase 3 gate closed — Qwen3
 bake-off (gold macro AUC 0.8613 vs 0.625 lexical anchor) and labeled the full corpus
 (`results/pseudo_labels_qwen3_4b.csv`, 52,884/52,884 answered, all consumer gates passed);
 **Phase 4 run 1 complete** — all 12 labels trained on those pseudo-labels, pooled OOF 0.7779 and
-gold transfer 0.7252 with the 58 gold studies excluded from both sides of every split. Next: get
-that model onto the leaderboard (`notebooks/phase4-submit/`), then Phase 5 experiment B.**
+gold transfer 0.7252 with the 58 gold studies excluded from both sides of every split, and
+**submitted** (`notebooks/phase4-submit/`, version 1) — awaiting the rerun score, to be read against
+the bands pre-registered in `NOTES.md`. Next: Phase 5 experiment B.**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
@@ -252,3 +253,13 @@ kaggle competitions list -s knee   # sanity check
 ```
 
 Competition rules must be accepted on kaggle.com before any data download works.
+
+**Set `machine_shape` in every new `kernel-metadata.json`.** `kaggle kernels push` forwards that
+field verbatim as the requested accelerator, and the empty string every older notebook here carries
+means "server picks" — which is why CLI pushes kept landing on a Tesla P100 the container's torch
+cannot use. `"machine_shape": "NvidiaTeslaT4"` selects GPU T4 x2 (or
+`--accelerator NvidiaTeslaT4`, which overrides the metadata). The pre-Phase-4 notebooks still carry
+the empty value; they are records of runs already made, so they are left as they are rather than
+rewritten — don't copy one as a template without fixing this field. Note also that a push **always**
+starts a run: there is no upload-without-running flag, and importing through the web editor is the
+only way to get a notebook onto Kaggle without executing it.
