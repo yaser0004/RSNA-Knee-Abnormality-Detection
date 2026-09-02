@@ -11,8 +11,10 @@ kept separate from the plan so the plan stays a stable strategy reference. Statu
 complete — trained, submitted, and scored on the real leaderboard; Phase 2 (preprocessing) gate
 closed — all 4,407 studies prepped and verified; Phase 3 gate closed — Qwen3-4B-Instruct won the
 bake-off (gold macro AUC 0.8613 vs 0.625 lexical anchor) and labeled the full corpus
-(`results/pseudo_labels_qwen3_4b.csv`, 52,884/52,884 answered, all consumer gates passed). Next:
-Phase 4, training on LLM pseudo-labels with the 58 gold studies held out.**
+(`results/pseudo_labels_qwen3_4b.csv`, 52,884/52,884 answered, all consumer gates passed);
+**Phase 4 run 1 complete** — all 12 labels trained on those pseudo-labels, pooled OOF 0.7779 and
+gold transfer 0.7252 with the 58 gold studies excluded from both sides of every split. Next: get
+that model onto the leaderboard (`notebooks/phase4-submit/`), then Phase 5 experiment B.**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
@@ -166,7 +168,9 @@ Three CSVs under `results/`, appended by `train.py`, never hand-edited:
 - `baseline.csv` — the first working (lexical-label) submission. Written once; every later number
   is a delta against this row.
 - `experiments.csv` — every training run: config, fold set, seed, per-label AUC, macro AUC,
-  paired delta vs. current best, train/inference time, whether it was promoted.
+  paired delta vs. current best, train/inference time, whether it was promoted. Phase 4 run 1's
+  rows carry `paired_delta=0.0` and must keep it: Phase 1 is a different fold set, study count
+  and label set, so no paired comparison between them exists.
 - `hall_of_fame.csv` — only runs that beat the previous best on a paired per-study delta across
   frozen folds and held up over 2-3 seeds. The final ensemble is built exclusively from these rows.
 
