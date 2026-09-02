@@ -965,3 +965,57 @@ that the consumer kernel requires before stitching.
 - Process note: CLI `kaggle kernels push` always triggers an auto-run, which has landed on P100
   essentially every time — GPU kernels now get built and validated locally, then handed to the
   human for the T4x2 editor ritual; only CPU-only kernels get pushed directly.
+
+### Phase 4 run 1 — pseudo-labels train all 12 labels (2026-08-26, ingested 2026-09-02)
+
+`efficientnet_b0` + slice mean-pool, 1 sagittal series x 16 slices, Adam 1e-4, batch 8, **1 epoch
+per fold**, 5 folds over frozen `primary_v2`, trained on Qwen3-4B soft pseudo-labels with all 58
+gold studies excluded from **both** sides of every split. T4x2, ~35 min total training.
+
+- **Pooled OOF macro AUC vs the pseudo-labels (4,349 studies): 0.7779.** Per fold 0.7642-0.8000.
+- **Gold transfer (58 held-out studies, their true rubric labels): 0.7252** for the mean of the 5
+  fold models; per-fold 0.6908-0.7264. The ensemble is not better than the best single fold
+  (fold 1, 0.7264) — at n=58 that 0.0012 is noise, and picking the best fold on 58 studies would
+  be selection bias, so the ensemble ships.
+- **The like-for-like number: 0.777 vs Phase 1's ~0.674.** On the four labels Phase 1 also trained
+  (ACL 0.805, Medial Meniscus 0.630, Effusion 0.939, Baker's 0.736) gold transfer averages 0.777
+  against the ~0.674 backed out of Phase 1's LB score — **+0.10**, and the other eight labels now
+  carry real signal instead of contributing a flat 0.500 each.
+- **`paired_delta` is 0.0 in all five rows and must stay that way.** Phase 1 is primary_v1 / 2,151
+  studies / 4 labels; Phase 4 is primary_v2 / 4,349 / 12. There is no study-paired comparison
+  between them — the gold-transfer number above is the only valid one. The five appended rows are
+  folds 0-4 in order (the run logged `fold_set=primary_v2` without a fold suffix).
+- No `hall_of_fame.csv` row: run 1 beats nothing on a paired delta because there is nothing to pair
+  it against. It is the **reference run** every Phase 5 delta is measured from.
+
+**MCL is the most informative number in the run, and it points straight at the input shape.**
+Gold transfer per label against the finding's plane and its corpus prevalence:
+
+| label | gold AUC | prevalence | plane |
+|---|---|---|---|
+| MCL | **0.5034** (random) | 0.020 | coronal |
+| Lateral OA | 0.6132 | 0.025 | coronal |
+| Medial Meniscus | 0.6298 | 0.319 | coronal + sagittal |
+| PF OA | 0.6821 | 0.058 | axial / sagittal |
+| Fracture | 0.7056 | 0.014 | any |
+| Lateral Meniscus | 0.7081 | 0.104 | coronal + sagittal |
+| Baker's | 0.7355 | 0.147 | sagittal / axial |
+| Synovitis | 0.7802 | 0.113 | sagittal |
+| Medial OA | 0.7922 | 0.074 | coronal |
+| ACL | 0.8051 | 0.082 | sagittal |
+| Contusion | 0.8084 | 0.103 | any |
+| Effusion | **0.9391** | 0.262 | sagittal |
+
+The Qwen3-4B *label* for MCL scored 0.887 gold AUC in the bake-off, so the label is fine — the model
+learned nothing from it. Run 1 feeds one **sagittal** series and MCL is a coronal structure; the
+model cannot see it. The two worst labels are both coronal, the best is the one most visible on
+sagittal. Next in `_SERIES_PRIORITY` after sagittal-fluid-sensitive is coronal-fluid-sensitive, so
+`max_series=2` is the one-variable change with a mechanism behind it rather than a guess.
+
+Caveats that don't go away: n=58 for every gold number, and MCL rests on 9 positives. Directional.
+
+**Process failure worth naming:** the kernel finished 2026-08-26 and the result sat on Kaggle for a
+week — unread, unlogged, and unsubmitted — while the leaderboard still showed the Phase 1 score. A
+run that isn't pulled back into `results/` didn't happen, in exactly the sense the plan's experiment
+discipline means it. Pull the output in the same sitting the kernel completes.
+
