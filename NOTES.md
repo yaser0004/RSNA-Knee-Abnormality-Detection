@@ -1098,3 +1098,44 @@ roughly **67 min per 1,000 hidden studies**, prep-bound, well inside the 9 h cap
 track the training positive rates across all 12 labels and preserve their ordering (Medial Meniscus
 0.268 vs 0.319, Effusion 0.144 vs 0.262, Fracture 0.006 vs 0.014). At n=3 that is a smoke signal,
 not a measurement, but a broken preprocessing path would not produce that shape.
+
+### Phase 4 scored: LB 0.763, and the leaderboard says the model is undertrained (2026-09-02)
+
+**0.558 -> 0.763 (+0.205)**, rank 2556 -> **2187 of 2936**. Clears the pre-registered >= 0.70 band,
+so the inference path is verified and preprocessing parity holds on the hidden set. It also beats
+what gold transfer predicted (0.7252), which is the pleasant direction to be wrong in — the 58-study
+gold set is enriched roughly 2x over corpus prevalence, so it was always a pessimistic proxy.
+
+**The gate is passed and the strategy is confirmed. The standings are the sobering part:**
+
+| percentile | score | | |
+|---|---|---|---|
+| 1st | 0.952 | teams >= 0.94 | 95 |
+| top 1% | 0.945 | teams >= 0.90 | **1,386** |
+| top 25% | 0.934 | teams >= 0.80 | 2,076 |
+| **median** | **0.899** | teams in [0.760, 0.766] | 16 |
+| ours | **0.763** | teams <= 0.558 (Phase 1) | 353 |
+
+We are in the **bottom quartile**, 0.184 below 10th place. Note how flat the top is: 5th percentile
+0.937 to 25th percentile 0.934 is a 0.003 spread across ~700 teams, which is the signature of a
+widely-copied public notebook rather than 700 independent solutions.
+
+**Checked the obvious explanation and it is not the one: `test.csv` carries only
+`StudyInstanceUID` — there is no `Report` column at test time.** Reports exist for training studies
+only. So the teams at 0.93 are predicting from images alone, exactly the frame this project is
+built on. The most-voted public notebooks are titled after their backbones — "Bend the Knee to
+DinoV3 (ensembled)", "DINOsaur V4", "DINO-RadImageNet Rank Ensemble" — alongside
+"read the report, then the knee", which is the pseudo-label thesis under another name.
+
+**So the weak-supervision thesis is vindicated and the model is the problem.** Run 1 is
+`efficientnet_b0` (ImageNet), **1 epoch**, 1 series x 16 slices, no augmentation, no AMP — 435
+optimizer steps in total. That is a smoke test that happens to score, not a trained model. The field
+is running domain-pretrained or self-supervised backbones (RadImageNet, DINOv3) with ensembling.
+
+**Consequence for the Phase 5 payoff order, recorded now rather than after another experiment:**
+the plan ranks series routing above backbone choice, and that ordering was set before there was any
+evidence of where we stand. Experiment B (2 series) is still worth its 70 minutes — it is cheap and
+MCL 0.503 is a real mechanistic failure with a named cause — but **no single one-variable experiment
+in the current list closes 0.184.** Epoch count and backbone are the two variables that have never
+been moved at all, and both are cheaper to test than they look. Re-rank before spending the
+experiment budget top-down on the old order.
