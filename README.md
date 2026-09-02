@@ -14,8 +14,11 @@ bake-off (gold macro AUC 0.8613 vs 0.625 lexical anchor) and labeled the full co
 (`results/pseudo_labels_qwen3_4b.csv`, 52,884/52,884 answered, all consumer gates passed);
 **Phase 4 run 1 complete** — all 12 labels trained on those pseudo-labels, pooled OOF 0.7779 and
 gold transfer 0.7252 with the 58 gold studies excluded from both sides of every split, and
-**submitted** (`notebooks/phase4-submit/`, version 1) — awaiting the rerun score, to be read against
-the bands pre-registered in `NOTES.md`. Next: Phase 5 experiment B.**
+**submitted** (`notebooks/phase4-submit/`, version 1) and scored **0.763 on the leaderboard**, up
+from Phase 1's 0.558 — clearing the pre-registered 0.70 band, so the inference path is verified.
+That is rank 2187/2936: the field's median is 0.899 and 10th place is 0.947, so the pseudo-label
+thesis is confirmed while the model itself — 1 epoch, one series, `efficientnet_b0` — is barely
+trained. Next: Phase 5, with the payoff order re-ranked (see `NOTES.md` 2026-09-02).**
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
