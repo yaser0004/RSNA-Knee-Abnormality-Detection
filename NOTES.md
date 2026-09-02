@@ -1019,3 +1019,41 @@ week — unread, unlogged, and unsubmitted — while the leaderboard still showe
 run that isn't pulled back into `results/` didn't happen, in exactly the sense the plan's experiment
 discipline means it. Pull the output in the same sitting the kernel completes.
 
+### Phase 4 submission path built and dry-run locally (2026-09-02)
+
+The Phase 4 model trained on Phase 2 artifacts (256px, letterboxed, per-series normalized,
+priority-ordered, mirrored at load time); `notebooks/phase1-submit/` reads raw DICOMs at 224px with
+none of that. Reusing it would have fed the model something it never saw, so `phase4-submit` sends
+each test study through **the same two functions the training data went through** — `prep_study`
+with Phase 2's parameters (`max_series=4, k_slices=24, size=256`), then `PreppedStudyDataset` with
+run 1's (`max_series=1, n_slices=16`). No third copy of the pipeline to drift.
+
+- **Prepping fewer series would not have been equivalent.** `select_series` exhausts
+  `_SERIES_PRIORITY[:max_series]` and then falls back to arbitrary dataframe order, so for a study
+  with no sagittal fluid-sensitive series a `max_series=1` prep picks a different series than a
+  `max_series=4` prep does. Prep parameters have to match Phase 2's, not the read config's.
+- **Local dry-run against the real fold checkpoints, 3 sample test studies:** prep **2.66 s/study**
+  (consistent with Phase 2's 1.9-2.1 s on Kaggle hardware), forward **1.40 s/study for all 5 models
+  on CPU** — the forward collapses on a GPU, so the hidden-test budget is prep-bound at roughly
+  0.75 h per 1,000 studies. Predictions for the one complete study look sane (all low, Medial
+  Meniscus highest at 0.16, matching it being the most prevalent label at 0.319).
+- **`data/sample/` only ships DICOMs for 1 of its 3 test studies**, so 2 hit the 0.5 fallback. Not a
+  bug — it accidentally became the first end-to-end proof that the fallback works: a study whose
+  pixels cannot be read yields a 0.5 row instead of killing the submission.
+- Artifacts are written to a temp dir and deleted as they are consumed, so peak disk is one study.
+  The hidden test set's size is not knowable in advance and `/kaggle/working` has ~21 GB.
+
+**Pre-registered reading of the resulting LB score** (recorded before submitting so it cannot be
+rationalized afterwards). Phase 1's backed-out 0.674-on-4-labels reproduces its 0.558 exactly under
+`(4 x 0.674 + 8 x 0.5) / 12`, which makes gold-transfer the working predictor of LB — imperfect,
+since that 0.674 was itself derived from the LB:
+
+- **>= 0.70** — inference path verified, proceed to Phase 5.
+- **0.60-0.70** — prevalence shift or a mild preprocessing mismatch; investigate before building on it.
+- **< 0.60** — treat as a **broken inference path, not a weak model**; debug preprocessing parity first.
+
+**`make_folds` reproduces `results/folds_primary_v2.csv` exactly** (verified locally, all 4,407
+rows), so the frozen file and the function cannot have drifted apart. Its digest —
+`cace8c45733ee7920a442fa4ae3f1db4a0d76401504e4729b49562d5eab52047` over sorted `uid,fold` lines — is
+now asserted in the Phase 5 notebook. Run 1 asserted fold *sizes* (`[881,881,881,882,882]`), which
+hold for any seed and would not have caught a reshuffle.

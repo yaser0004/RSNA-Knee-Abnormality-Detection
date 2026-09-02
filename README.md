@@ -89,14 +89,35 @@ faster 4B, which labels the full corpus in one ~4h session instead of two. Both 
 anchor (+0.24), and both score matrices are kept in `results/bakeoff_scores/` for Phase 4
 calibration analysis without another GPU session.
 
-Core library (`src/knee/`) covered by tests (108; 106 run without a GPU-capable box — the two
-`test_model.py` cases instantiate a backbone): DICOM series/slice selection, laterality
+Phase 4 trains the Phase 1 architecture on those pseudo-labels — all 12 findings, soft targets,
+5 folds over the frozen `primary_v2` assignment, with the **58 gold studies excluded from both
+sides of every split** (Phase 1 had silently trained on 36 of them, which is why its gold gate had
+to be substituted with an LB back-out). Run 1: pooled OOF macro AUC **0.7779** against the
+pseudo-labels, and gold transfer **0.7252** — the direct LLM-label → rubric number Phase 1 could
+only infer. On the four labels Phase 1 also trained, gold transfer averages **0.777 vs its ~0.674**,
+and the other eight labels now carry real signal instead of a flat 0.500 each.
+`notebooks/phase4-submit/` puts that model on the leaderboard: each test study goes through the same
+`prep_study` → `PreppedStudyDataset` path the training artifacts went through (Phase 2's prep
+parameters, run 1's read parameters), prep inside `predict_fn` so a decode failure falls back to 0.5
+instead of killing the submission, and the mean of all five fold models.
+
+Phase 5 starts from run 1's most informative failure. Gold transfer put **MCL at 0.5034 — random —
+and Lateral OA at 0.6132**, while Effusion reached 0.9391. The Qwen3-4B *label* for MCL scored 0.887
+gold AUC in the bake-off, so the label is fine; run 1 feeds the model a single **sagittal** series
+and MCL is a coronal structure. Next in `_SERIES_PRIORITY` is coronal-fluid-sensitive, so
+`notebooks/phase5-train/` changes exactly one thing — `max_series` 1 → 2 — and predicts, in writing
+before the run, that the coronal labels move most while the sagittal ones barely do. It also carries
+the first real **paired delta**: run 1's OOF arrays ride in as a kernel input, so the two runs are
+compared study-by-study on identical folds with a bootstrap CI (`paired_macro_auc_delta`), logged as
+one pooled row rather than faked per fold.
+
+Core library (`src/knee/`) covered by tests (118, all of which run on a laptop in ~25 s): DICOM series/slice selection, laterality
 resolution (per-header and per-study, with real-world tag-value normalization), pixel decode/
 normalize, per-series normalization, pad-to-square and laterality mirroring, JPEG-in-`.npz` study
 storage with selective decode, the `prep_study` orchestrator (including its skip-unusable-series and
 decode-failure recording), dataset classes for both raw and prepped studies (plus an in-memory
 decode cache), model, NaN-masked BCE loss, fold assignment, training/eval loops, experiment logging,
-macro AUC, and a submission writer with a 0.5 fallback.
+macro AUC, the paired bootstrap delta, and a submission writer with a 0.5 fallback.
 
 Only 58 of 4,407 training studies carry gold rubric labels (verified directly, not the "a few
 hundred" first assumed) — this is effectively a weak-supervision competition, not a conventional
@@ -134,7 +155,10 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
   reports.py         [done] EN/ES lexical rules (kept as a per-label fallback candidate,
                       not replaced) + the Phase 3 LLM generator: verbatim rubric,
                       per-label criterion prompts, yes/no-logit soft scoring
-  metrics.py         [done] macro AUC, per-label AUC (NaN-safe); bootstrap CI not yet added
+  metrics.py         [done] macro AUC, per-label AUC (NaN-safe), and paired_macro_auc_delta:
+                      the bootstrap 95% CI the promotion rule ("the paired delta clears
+                      noise") is evaluated against, resampling studies for both arms
+                      together
 notebooks/           thin Kaggle notebooks: import knee, call one function
   knee-phase1-smoke-test.ipynb  validated end-to-end round trip on real Kaggle infra (internet off)
   phase1-train/        real 5-fold training run -- lexical labels, efficientnet_b0, OOF macro AUC 0.7985
@@ -155,6 +179,12 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         incremental saves, per-shard completion sentinel
   phase3-label-consume/  CPU stitch+verify kernel: exact partition, value sanity, gold cross-check
                         vs the attached bake-off output, macro AUC recheck -> pseudo_labels CSV
+  phase4-train/        run 1: all 12 labels on the LLM pseudo-labels, gold excluded from both
+                        sides of every split, plus the post-training gold transfer tier
+  phase4-submit/       the scored submission for run 1: prep_study -> PreppedStudyDataset per
+                        study (same path the training artifacts took), 5-fold mean, 0.5 fallback
+  phase5-train/        experiment B: max_series 1 -> 2 and nothing else, with the paired
+                        bootstrap delta against run 1's OOF arrays
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
@@ -168,9 +198,11 @@ Three CSVs under `results/`, appended by `train.py`, never hand-edited:
 - `baseline.csv` — the first working (lexical-label) submission. Written once; every later number
   is a delta against this row.
 - `experiments.csv` — every training run: config, fold set, seed, per-label AUC, macro AUC,
-  paired delta vs. current best, train/inference time, whether it was promoted. Phase 4 run 1's
-  rows carry `paired_delta=0.0` and must keep it: Phase 1 is a different fold set, study count
-  and label set, so no paired comparison between them exists.
+  paired delta vs. current best, train/inference time, whether it was promoted. One row per fold,
+  plus (from Phase 5 on) a `primary_v2_pooled` row carrying the paired delta — that number is a
+  property of the whole OOF, not of any single fold. Phase 4 run 1's rows carry `paired_delta=0.0`
+  and must keep it: Phase 1 is a different fold set, study count and label set, so no paired
+  comparison between them exists.
 - `hall_of_fame.csv` — only runs that beat the previous best on a paired per-study delta across
   frozen folds and held up over 2-3 seeds. The final ensemble is built exclusively from these rows.
 
