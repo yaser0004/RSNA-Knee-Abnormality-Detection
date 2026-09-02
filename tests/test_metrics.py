@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 from sklearn.metrics import roc_auc_score
 
-from knee.metrics import macro_auc, per_label_auc
+from knee.metrics import macro_auc, paired_macro_auc_delta, per_label_auc
 
 
 def test_macro_auc_matches_sklearn_macro_average():
@@ -73,3 +73,43 @@ def test_macro_auc_handles_all_nan_column():
     actual = macro_auc(y_true, y_pred)
 
     assert actual == pytest.approx(expected)
+
+
+def test_paired_delta_is_positive_and_ci_excludes_zero_for_a_better_model():
+    rng = np.random.default_rng(0)
+    y_true = rng.integers(0, 2, size=(400, 3)).astype(float)
+    # b sees the label through less noise than a, so b must win
+    noisy = lambda scale: y_true + rng.normal(0, scale, size=y_true.shape)
+    y_a, y_b = noisy(1.2), noisy(0.4)
+
+    delta, lo, hi = paired_macro_auc_delta(y_true, y_a, y_b, n_boot=200, seed=0)
+
+    assert delta > 0
+    assert lo < delta < hi
+    assert lo > 0, "a clearly better model should have a CI that excludes zero"
+
+
+def test_paired_delta_of_a_model_against_itself_is_exactly_zero():
+    rng = np.random.default_rng(1)
+    y_true = rng.integers(0, 2, size=(200, 3)).astype(float)
+    y_pred = y_true + rng.normal(0, 0.8, size=y_true.shape)
+
+    delta, lo, hi = paired_macro_auc_delta(y_true, y_pred, y_pred, n_boot=100, seed=0)
+
+    # the same studies are resampled for both arms, so every bootstrap replicate
+    # cancels exactly -- a delta that drifts here means the pairing is broken
+    assert delta == 0.0
+    assert lo == 0.0 and hi == 0.0
+
+
+def test_paired_delta_ignores_labels_that_are_single_class_in_a_replicate():
+    rng = np.random.default_rng(2)
+    y_true = np.zeros((60, 2))
+    y_true[:, 0] = rng.integers(0, 2, size=60)   # both classes
+    y_true[:5, 1] = 1                            # rare: replicates will miss it
+    y_a = rng.normal(size=(60, 2))
+    y_b = y_true + rng.normal(0, 0.5, size=(60, 2))
+
+    delta, lo, hi = paired_macro_auc_delta(y_true, y_a, y_b, n_boot=100, seed=0)
+
+    assert np.isfinite([delta, lo, hi]).all()
