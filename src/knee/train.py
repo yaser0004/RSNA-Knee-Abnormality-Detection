@@ -150,24 +150,57 @@ def log_experiment(
     df.to_csv(csv_path, mode="a", index=False, header=False)
 
 
-def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu") -> float:
+def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
+                    scaler=None, scheduler=None) -> float:
     """One training epoch. A batch where every label is NaN for every study in
     it (masked_bce_loss's ValueError) is skipped rather than crashing the run
-    -- possible with a small batch size and a low-coverage lexical label."""
+    -- possible with a small batch size and a low-coverage lexical label.
+
+    `scaler` is a torch.amp.GradScaler; passing one runs the forward under
+    autocast on the matching device type. Left None the arithmetic is exactly
+    what Phase 4 ran, so every pre-AMP result stays reproducible from this
+    function rather than from a copy of it.
+
+    `scheduler` is stepped once per optimizer step, not once per epoch: OneCycle
+    and every other per-batch schedule define their cycle in steps, and stepping
+    per epoch would traverse 1/len(loader) of the cycle and leave the learning
+    rate stranded near its floor.
+
+    A skipped all-NaN batch steps neither the optimizer nor the scheduler --
+    there was no update to schedule."""
     model.train()
     total_loss = 0.0
     n_batches = 0
+    autocast_device = "cuda" if str(device).startswith("cuda") else "cpu"
+
     for images, labels, _ in loader:
         images = images.to(device)
         labels = labels.to(device)
         optimizer.zero_grad()
-        logits = model(images)
-        try:
-            loss = masked_bce_loss(logits, labels)
-        except ValueError:
-            continue
-        loss.backward()
-        optimizer.step()
+
+        if scaler is None:
+            logits = model(images)
+            try:
+                loss = masked_bce_loss(logits, labels)
+            except ValueError:
+                continue
+            loss.backward()
+            optimizer.step()
+        else:
+            with torch.autocast(autocast_device, enabled=scaler.is_enabled()):
+                logits = model(images)
+                try:
+                    loss = masked_bce_loss(logits, labels)
+                except ValueError:
+                    continue
+            # BCE-with-logits under fp16 can underflow the backward pass; the
+            # scaler is what keeps those gradients representable.
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
+
+        if scheduler is not None:
+            scheduler.step()
         total_loss += loss.item()
         n_batches += 1
 

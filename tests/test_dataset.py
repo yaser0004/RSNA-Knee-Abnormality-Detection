@@ -6,7 +6,13 @@ import torch
 
 import numpy as np
 
-from knee.dataset import CachedDataset, KneeStudyDataset, PreppedStudyDataset, StudyDecodeError
+from knee.dataset import (
+    CachedDataset,
+    KneeStudyDataset,
+    PreppedStudyDataset,
+    StudyDecodeError,
+    augment_volume,
+)
 from knee.infer import LABEL_COLUMNS, build_submission
 from knee.prep import save_study_npz
 
@@ -287,3 +293,109 @@ def test_cached_dataset_only_computes_each_item_once():
     cached[0]
 
     assert base.call_count == 1
+
+
+def test_prepped_dataset_side_override_mirrors_a_study_the_artifact_left_unresolved(tmp_path):
+    """Phase 2 prepped 49% of the corpus with side=None because no tag resolved.
+    The geometry route recovers those sides (NOTES 2026-09-05), and the pixels
+    were stored unmirrored -- so the correction lands here, at load time, rather
+    than costing a re-prep of all 4,407 studies."""
+    stored = _write_prepped_study(tmp_path, "unresolved", n_series=1, n_slices=1,
+                                  size=8, side=None, planes=["Coronal"])
+
+    without = PreppedStudyDataset(["unresolved"], tmp_path, n_slices=1, max_series=1)[0][0]
+    with_side = PreppedStudyDataset(["unresolved"], tmp_path, n_slices=1, max_series=1,
+                                    sides={"unresolved": "L"})[0][0]
+
+    original = stored["series-0"][0]
+    flipped = torch.from_numpy(np.fliplr(original).copy().astype(np.float32) / 255.0)
+    assert (with_side[0, 0] - flipped).abs().mean() < 8 / 255.0
+    assert not torch.equal(without, with_side)
+
+
+def test_prepped_dataset_side_override_wins_over_the_stored_side(tmp_path):
+    _write_prepped_study(tmp_path, "s", n_series=1, n_slices=1, size=8, side="R",
+                         planes=["Coronal"])
+
+    stored_side = PreppedStudyDataset(["s"], tmp_path, n_slices=1, max_series=1)[0][0]
+    overridden = PreppedStudyDataset(["s"], tmp_path, n_slices=1, max_series=1,
+                                     sides={"s": "L"})[0][0]
+
+    assert not torch.equal(stored_side, overridden)
+
+
+def test_prepped_dataset_falls_back_to_the_stored_side_for_studies_not_in_the_map(tmp_path):
+    """A partial map must not silently un-mirror every study missing from it."""
+    _write_prepped_study(tmp_path, "s", n_series=1, n_slices=1, size=8, side="L",
+                         planes=["Coronal"])
+
+    stored_side = PreppedStudyDataset(["s"], tmp_path, n_slices=1, max_series=1)[0][0]
+    partial = PreppedStudyDataset(["s"], tmp_path, n_slices=1, max_series=1,
+                                  sides={"other": "R"})[0][0]
+
+    assert torch.equal(stored_side, partial)
+
+
+# --- augmentation (Phase 5 screen B) -----------------------------------------
+# Screen A measured train stable-6 0.979 against val 0.836 at 8 epochs, so the
+# binding constraint is overfitting and this is the lever for it.
+
+def test_augment_volume_changes_the_pixels():
+    torch.manual_seed(0)
+    volume = torch.rand(4, 32, 32)
+
+    out = augment_volume(volume)
+
+    assert out.shape == volume.shape
+    assert out.dtype == volume.dtype
+    assert not torch.equal(out, volume)
+
+
+def test_augment_volume_applies_one_transform_to_every_slice():
+    """A study is one sample. Jittering slices independently would desynchronise
+    the anatomy down the stack, which is noise rather than augmentation."""
+    torch.manual_seed(0)
+    slice_ = torch.rand(1, 32, 32)
+    volume = slice_.repeat(5, 1, 1)          # five identical slices
+
+    out = augment_volume(volume)
+
+    for i in range(1, 5):
+        assert torch.equal(out[0], out[i]), f"slice {i} got a different transform"
+
+
+def test_augment_volume_keeps_values_in_range():
+    torch.manual_seed(0)
+    volume = torch.rand(4, 32, 32)
+
+    for _ in range(10):
+        out = augment_volume(volume)
+        assert out.min() >= 0.0 and out.max() <= 1.0
+
+
+def test_augment_volume_never_mirrors():
+    """Laterality is canonicalised upstream (every knee mapped to one side), so a
+    horizontal flip here would undo exactly the signal four labels depend on."""
+    torch.manual_seed(0)
+    # a left-right asymmetric volume: bright on one side only
+    volume = torch.zeros(2, 16, 16)
+    volume[:, :, :4] = 1.0
+
+    for _ in range(20):
+        out = augment_volume(volume)
+        assert out[:, :, :8].sum() > out[:, :, 8:].sum(), "augmentation mirrored the volume"
+
+
+def test_prepped_dataset_augments_only_when_asked(tmp_path):
+    _write_prepped_study(tmp_path, "s", n_series=1, n_slices=2, size=16)
+
+    torch.manual_seed(0)
+    plain = PreppedStudyDataset(["s"], tmp_path, n_slices=2, max_series=1)[0][0]
+    torch.manual_seed(0)
+    again = PreppedStudyDataset(["s"], tmp_path, n_slices=2, max_series=1)[0][0]
+    torch.manual_seed(0)
+    augmented = PreppedStudyDataset(["s"], tmp_path, n_slices=2, max_series=1, augment=True)[0][0]
+
+    assert torch.equal(plain, again), "the un-augmented path must stay deterministic"
+    assert not torch.equal(plain, augmented)
+    assert augmented.shape == plain.shape
