@@ -14,6 +14,8 @@ from knee.dicom import (
     select_series,
 )
 from knee.infer import LABEL_COLUMNS
+from torchvision.transforms.v2 import functional as TF
+
 from knee.prep import load_study_npz, mirror_to_canonical, mirrors_in_plane
 
 # StudyDecodeError and _read_slice_header moved to knee.dicom (knee.prep raises
@@ -22,10 +24,47 @@ from knee.prep import load_study_npz, mirror_to_canonical, mirrors_in_plane
 # already import them from knee.dataset.
 __all__ = [
     "CachedDataset",
+    "augment_volume",
     "KneeStudyDataset",
     "PreppedStudyDataset",
     "StudyDecodeError",
 ]
+
+
+# Rigid jitter only. No flip of either axis: laterality is canonicalized upstream
+# (mirror_to_canonical maps every knee onto one side) and four of the twelve labels
+# are medial/lateral pairs, so a horizontal flip would destroy exactly the signal
+# that canonicalization exists to create.
+_AUG_ROT_DEG = 8.0
+_AUG_TRANSLATE = 0.05
+_AUG_SCALE = 0.08
+_AUG_INTENSITY = 0.10
+
+
+def augment_volume(volume: torch.Tensor) -> torch.Tensor:
+    """Train-time jitter for one study's stack, shape [n, H, W] in [0, 1].
+
+    One transform is drawn per call and applied to every slice: a study is a
+    single sample, and jittering slices independently would desynchronize the
+    anatomy down the stack, which is noise rather than augmentation.
+
+    Screen A measured train stable-6 0.979 against val 0.836 at 8 epochs
+    (NOTES 2026-09-05), so the model is fitting its training set and this is the
+    lever for that, not more capacity.
+
+    Parameters are drawn from torch's global RNG, so seeding the run seeds the
+    augmentation with it."""
+    angle = float(torch.empty(()).uniform_(-_AUG_ROT_DEG, _AUG_ROT_DEG))
+    scale = float(torch.empty(()).uniform_(1.0 - _AUG_SCALE, 1.0 + _AUG_SCALE))
+    max_shift = _AUG_TRANSLATE * volume.shape[-1]
+    shift = [float(torch.empty(()).uniform_(-max_shift, max_shift)) for _ in range(2)]
+    gain = float(torch.empty(()).uniform_(1.0 - _AUG_INTENSITY, 1.0 + _AUG_INTENSITY))
+
+    # affine() takes [..., H, W]; passing the whole stack at once is what applies
+    # the identical transform to every slice
+    out = TF.affine(volume.unsqueeze(1), angle=angle, translate=shift, scale=scale,
+                    shear=[0.0, 0.0]).squeeze(1)
+    return (out * gain).clamp_(0.0, 1.0)
 
 
 def _lookup_labels(labels_df: pd.DataFrame | None, study_uid: str) -> torch.Tensor | None:
@@ -126,6 +165,8 @@ class PreppedStudyDataset(Dataset):
         n_slices: int = 24,
         max_series: int = 4,
         canonical: str = "R",
+        sides: dict[str, str] | None = None,
+        augment: bool = False,
     ):
         self.study_uids = list(study_uids)
         self.npz_root = Path(npz_root)
@@ -133,6 +174,15 @@ class PreppedStudyDataset(Dataset):
         self.n_slices = n_slices
         self.max_series = max_series
         self.canonical = canonical
+        # Per-study side override, keyed by StudyInstanceUID. Phase 2 wrote
+        # side=None into 49% of the artifacts because no tag resolved; the
+        # geometry route recovers those (NOTES 2026-09-05) and the artifacts
+        # store unmirrored pixels, so the correction belongs here rather than in
+        # a re-prep. A study absent from the map keeps its stored side.
+        self.sides = sides or {}
+        # train-time only: the val and gold tiers must see the same pixels every
+        # epoch or their scores are not comparable across configs
+        self.augment = augment
 
     def __len__(self) -> int:
         return len(self.study_uids)
@@ -156,7 +206,7 @@ class PreppedStudyDataset(Dataset):
         if not series_slices:
             raise StudyDecodeError(f"prepped artifact for {study_uid} holds no series")
 
-        side = meta.get("side")
+        side = self.sides.get(study_uid, meta.get("side"))
         series_meta = meta.get("series", {})
         blocks = []
         # load_study_npz already orders series_slices by _SERIES_PRIORITY
@@ -179,6 +229,10 @@ class PreppedStudyDataset(Dataset):
             blocks.append(blocks[-1])
 
         volume = np.stack([s for block in blocks for s in block]).astype(np.float32) / 255.0
+        if self.augment:
+            # augment before the channel expand: the expand is a view, and
+            # transforming it would materialize a full float32 copy per study
+            return augment_volume(torch.from_numpy(volume)).unsqueeze(1).expand(-1, 3, -1, -1)
         # expand, not repeat: identical values, but a view instead of a 75MB
         # float32 copy per study (max_series * n_slices * 3 * size^2). The copy
         # measured as the single largest cost in the loader -- larger than all

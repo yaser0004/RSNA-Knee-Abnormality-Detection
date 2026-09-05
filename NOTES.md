@@ -1139,3 +1139,226 @@ MCL 0.503 is a real mechanistic failure with a named cause — but **no single o
 in the current list closes 0.184.** Epoch count and backbone are the two variables that have never
 been moved at all, and both are cheaper to test than they look. Re-rank before spending the
 experiment budget top-down on the old order.
+
+### Phase 5 Step 1 — public-notebook recon, and two of its claims tested against our data (2026-09-05)
+
+Pulled the five most-voted public notebooks into `ai/research/` (intel only; we write our own
+code). The 0.934 cluster is **`pilkwang/rsna-knee-baseline-v1`, 512 votes** — nearly 3x the next
+notebook and comfortably the thing ~700 teams forked. It is an *inference* notebook that loads
+pre-fitted weights, but it carries the full recipe in its source.
+
+**Its recipe, against ours:**
+
+| | ours (run 1) | pilkwang |
+|---|---|---|
+| input | 1 series x 16 slices | **6 slots** (plane x weighting x fat-sat) + presence mask |
+| scale | 256px letterbox, fixed *pixels* | crop to **130 mm**, resize 224/336 -> fixed **mm/pixel** |
+| channels | slice replicated to 3 | **3 adjacent slices** as the 3 channels |
+| backbone | `efficientnet_b0`, ImageNet, all trainable | **DINOv2-small**, last **6** blocks only |
+| lr | Adam 1e-4, flat | AdamW **8e-6 backbone / 1e-3 head**, OneCycle, wd 0.02 |
+| epochs | **1** | **10** |
+| aug | none | rot 8deg, scale 0.08, shift 0.05, intensity 0.10, **no flips** |
+| head | mean-pool -> linear | per-diagnosis **attention over slots**, masked softmax |
+| ensembling | probability mean of 5 folds | **rank mean** (AUC reads only order) |
+| label weights | `weight_*` computed, unused | confidence as **sample weight**; gold at elevated weight |
+| split | shuffled by uid | grouped by **report-text hash** |
+| AMP | none | autocast + GradScaler |
+
+The six slots are `SAG_FLUID_FS`, `COR_FLUID_FS`, `AX_FLUID_FS`, `SAG_FLUID_NOFS`, `COR_T1`,
+`SAG_T1`. It also reports that `train_series.csv`'s `Fluid_Sensitive` and `Fat_Suppression` columns
+**agree on every row**, so as delivered they carry one axis rather than two; it recovers both from
+TR/TE and `ScanningSequence` in the headers.
+
+Two arguments worth keeping even where we don't copy the implementation:
+
+- **Nyquist bounds the resize, and no capacity downstream recovers it.** A meniscal tear is 1-3 mm,
+  so the pitch must be <= d/2. At a 130 mm crop, 224px gives 0.580 mm/px and 336px gives 0.387.
+  Our 256px *letterbox* normalises no physical scale at all — studies differ in mm/px by a factor
+  of several, and the model sees them as if they didn't.
+- **Rank-mean, not probability-mean, for ensembles.** AUC is invariant under any increasing map, so
+  averaging probabilities lets the most confident member dominate while averaging ranks combines
+  exactly the information the metric reads. Free change to `phase4-submit`.
+
+**Two of its claims tested directly against our own data — both land, one of them big:**
+
+**1. The laterality heuristic we rejected was rejected for the wrong reason.** NOTES 2026-08-08
+killed the `ImagePositionPatient`-sign rule at 40% disagreement with the real `Laterality` tag, and
+the plan has carried "laterality unresolved for 48.9% of studies" as a known ceiling ever since.
+pilkwang uses the **image centre**, not `p` itself — `p` is a corner half a field of view away,
+which flips sign on a knee scanned near the midline:
+
+```
+c = p + r * col_spacing * (Columns/2) + d * row_spacing * (Rows/2)
+side = R if c_x < 0 else L
+```
+
+Re-run on the same 20 local sample studies (11 carry a real tag):
+
+| form | agreement |
+|---|---|
+| corner `p_x` (the rejected one) | 9/11 = **81.8%** |
+| **centre `c_x`** | **11/11 = 100%** |
+
+**Caveat on the comparison:** only 11 of the 20 local sample studies carry a tag, so the corner
+form measures 18.2% disagreement here, not the 40% the 2026-08-08 entry recorded over 20 studies.
+That entry's denominator and sample are not reproducible from what is in `results/` (the census CSVs
+carry no geometry), so treat 81.8% as "the corner form on the 11 studies we can check today", not as
+a restatement of the original number. What is not in doubt is the *paired* comparison: on identical
+series, centre beats corner, and the two corner failures are exactly the predicted case — `p_x` of -17.1 and -3.2 on knees whose
+centres sit at +69.5 and +78.9. Median `|c_x|` is 83 mm, well outside pilkwang's 20 mm unresolved
+band, so the sign is not marginal here. n=11 is small and this must be re-verified at corpus scale
+(every study has the geometry, ~51% carry a tag to check against) — but the original 40% figure
+measured the corner form, and the centre form is a different rule. **This plausibly unlocks the half
+of the corpus that currently enters the model unmirrored, which is the named cap on medial/lateral
+discrimination and on MCL.**
+
+**2. Shared reports leak across our folds, but only mildly.** Byte-identical reports appear in
+**49 groups covering 183 studies (4.2%)** — one group has 37 members. Against
+`folds_primary_v2.csv`, **45 groups straddle more than one fold, affecting 175 studies (3.97%)**.
+So our OOF is optimistic by whatever those 4% contribute — real, worth fixing when the folds are
+next re-frozen, not worth invalidating run 1 over. Re-freezing folds now would break the paired
+comparison Phase 5 is built on, so this is logged and deferred, not acted on.
+
+**What this does to the Step 3 sweep order.** The recon was the gate on the grid, and it says the
+grid was aimed too low: epochs 1 -> 10, a domain-appropriate self-supervised backbone, physical-scale
+sampling and multi-slot input are not one-variable refinements of run 1's configuration, they are
+most of the distance to 0.93. `efficientnet_b0` at 1 series x 16 slices on a fixed-pixel letterbox
+cannot reach it at any schedule.
+
+### The geometry laterality route holds at corpus scale — coverage 51.1% -> 98.5% (2026-09-05)
+
+`notebooks/phase5-laterality/`, CPU-only, 4,407 studies walked in **2.1 min**. Scored against the
+2,182 studies where a real tag and the geometry route both resolve:
+
+| | |
+|---|---|
+| **agreement** | **2162/2182 = 99.08%** |
+| tag route resolves | 2,252 / 4,407 = 51.1% |
+| geometry route resolves | 4,271 / 4,407 = 96.9% |
+| **either resolves** | **4,341 / 4,407 = 98.5%** |
+| newly resolved by geometry | **2,089 (47.4% of the corpus)** |
+| still unresolved | 66 (all `geometry_midline`) |
+
+Both pre-registered gate conditions cleared (>= 99% agreement, >= 30% newly resolved). **Verdict:
+adopt.**
+
+**The 20 disagreements are not the midline band.** Their |centre_x| runs 60-113 mm (median 87), so
+the band is not too narrow — these are genuine disagreements, 0.92% of scored studies, all against
+the `Laterality` tag (0/74 against `SeriesDescription`), in both directions (13 L->R, 7 R->L) and
+with no concentration by series count. Whether the tag or the geometry is wrong on those 20 is not
+determinable from here, and **it does not matter for the wiring**: geometry is strictly a fallback
+*after* every tag route, so those 20 studies keep their tag value and nothing changes for them. The
+99.08% is evidence that the rule is sound where it actually gets used — the 2,089 studies that had
+nothing at all.
+
+**The correction costs no re-prep.** Phase 2 deliberately stored pixels **unmirrored** with the
+resolved side in `meta`, and `PreppedStudyDataset` mirrors at load time — a decision recorded in
+`prep.py` as keeping "artifacts neutral to a laterality decision Phase 3 may still improve." That
+decision pays off exactly here: the 4,407 artifacts stay valid and only the side each one is read
+with changes.
+
+Wiring, both halves needed:
+
+- `resolve_study_laterality` falls back to `side_from_geometry` when no tag resolves. **This is the
+  half that matters for the leaderboard**: `phase4-submit` preps each hidden-test study fresh
+  through this function, so without it training would use corrected sides and inference would not —
+  a train/test mismatch on the four medial/lateral labels, which is worse than leaving both wrong.
+- `PreppedStudyDataset(sides=...)` overrides the stored side per study, so the existing artifacts
+  can be read with corrected sides. `results/laterality_sides_v2.csv` is that map, and it reproduces
+  what the patched resolver now returns (tag wins; geometry only where no tag resolved):
+  `Laterality` 2178, `geometry` 2089, `SeriesDescription` 74, `geometry_midline` 66.
+  Side balance R 2298 / L 2043.
+
+One diagnostic was nearly lost in the wiring and put back: falling back unconditionally would have
+replaced the `conflict` and `unknown` routes with `geometry_unavailable`, collapsing "the tags
+contradicted each other" and "there were no tags" into one label the Phase 2 census counts
+separately. Geometry now overrides only when it is actually readable.
+
+**What this does not yet do.** Nothing has been retrained on it. The screen running now
+(`phase5-screen`) deliberately uses the stored sides, so it stays a clean one-variable read of the
+training schedule; the laterality fix is its own screen row afterwards. The prediction on record,
+before that run: MCL (0.5034, random) and Lateral OA (0.6132) move most, because they are coronal
+findings whose plane is exactly what an unmirrored study scrambles, and Effusion (0.9391, sagittal)
+barely moves.
+
+### Two process notes from launching the Phase 5 screen (2026-09-05)
+
+**The submission half of the laterality fix is verified locally, not just the training half.**
+`census_study_laterality` is what `prep_study` calls, and it is the function the hidden-test path
+runs per study. On the 20 local sample studies it now resolves **20/20 (11 `Laterality`, 9
+`geometry`)** where it previously resolved 11 and left 9 unknown. So training and inference will
+canonicalize the same way, which was the actual risk: correcting only the training side would have
+introduced a train/test mismatch on the four medial/lateral labels, and that is worse than leaving
+both uncorrected.
+
+**A stale `rsna-knee-src` dataset version killed the first screen run 7.5 min in.** The kernel was
+pushed after `train.py` grew its AMP/scheduler parameters but *before* the src dataset was
+re-versioned, so the kernel mounted a snapshot without them. The cheap guard at the top —
+
+```python
+assert {'scaler', 'scheduler'} <= set(inspect.signature(train_one_epoch).parameters)
+```
+
+— turned a confusing mid-run `TypeError` two hours deep into an explicit failure at cell 2. **Rule
+worth keeping: a kernel that depends on a code change must re-push the src dataset first, and
+should assert the specific attribute it depends on rather than trusting the mount.** The guard now
+covers `PreppedStudyDataset(sides=...)` as well.
+
+The relaunched screen also folds in the laterality comparison rather than paying for a second
+kernel: `s6` is run 1's schedule with corrected sides (isolating the mirroring against `s1`), and
+`s7` is the best schedule off the epoch ladder plus corrected sides — built after the ladder runs,
+since which schedule wins is not knowable in advance. It asks Kaggle for **7 notebook inputs**;
+NOTES previously recorded 5 as verified and 6 as untested, and 7 mounted fine.
+
+### Phase 5 screen A: the schedule was worth +0.061, and the model now overfits (2026-09-05)
+
+Fold 0 only, 867 val studies, `efficientnet_b0` 1 series x 16 slices throughout. Decisions on the
+six stable labels, full 12-label macro reported alongside. Paired bootstrap against run 1's own
+fold-0 OOF predictions.
+
+| config | full macro | stable-6 val | stable-6 **train** | gap | delta vs run 1 (95% CI) | min |
+|---|---|---|---|---|---|---|
+| run 1 (e1, flat, fp32) | 0.7805 | 0.7769 | — | — | — | 6.5 |
+| s1 e1 flat **+AMP** | 0.7962 | 0.7788 | 0.8322 | +0.053 | +0.0019 [-0.0083, +0.0111] | 4.8 |
+| s2 e4 OneCycle | 0.8250 | 0.8212 | 0.8995 | +0.078 | +0.0443 [+0.0344, +0.0548] | 16.0 |
+| **s3 e8 OneCycle** | **0.8413** | **0.8362** | 0.9788 | +0.143 | **+0.0592 [+0.0458, +0.0726]** | 31.8 |
+| s4 e8 **flat** | 0.8184 | 0.8135 | 0.9973 | +0.184 | +0.0366 [+0.0211, +0.0512] | 31.6 |
+| s5 e12 OneCycle | 0.8311 | 0.8276 | 0.9975 | +0.170 | +0.0506 [+0.0357, +0.0657] | 48.2 |
+| s6 e1 flat + laterality | 0.7963 | 0.7785 | 0.8321 | +0.054 | +0.0016 [-0.0085, +0.0108] | 4.4 |
+| s7 e8 OneCycle + laterality | 0.8417 | 0.8365 | 0.9788 | +0.142 | +0.0595 [+0.0460, +0.0728] | 35.7 |
+
+**Four findings, in order of how much they change what happens next.**
+
+**1. Epoch count was the single largest lever in the project so far: +0.061 full macro on fold 0**
+(0.7805 -> 0.8413) for 32 minutes of T4. Per label, e8 beats e1 on nine of twelve — Baker's +0.102,
+ACL +0.080, Contusion +0.075, Medial Meniscus +0.070, Lateral Meniscus +0.061, MCL +0.056.
+
+**2. The schedule is separable from the epoch count and worth +0.023 on its own.** s4 (8 epochs,
+flat LR) reaches 0.8135 against s3's 0.8362 at the same 8 epochs. Including that control is the only
+reason "more epochs" and "OneCycle" are not confounded here.
+
+**3. The curve turns over between 8 and 12 epochs**, and the train column says why: s3 reaches
+train 0.979 and s5 train 0.9975 — **the model has memorised its training set** while val went
+*down* 0.836 -> 0.828. The two labels that lose ground under longer training are the two rarest and
+the one already saturated: Fracture 0.866 -> 0.829 (prevalence 0.014) and Effusion 0.849 -> 0.838.
+**This settles the question Step 0 could not:** at 1 epoch the model was underfit, by 8 it is
+overfit, so the next lever is augmentation and regularisation, not more epochs. That was
+pre-registered as the reading of this column before the run.
+
+**4. AMP is free** — +0.0019 with a CI spanning zero, at 4.8 min against run 1's 6.5 (~1.35x). Take
+it as throughput, never as accuracy. s1 also validates the harness: it lands on run 1's own fold-0
+number (stable-6 0.7788 vs 0.7769), so the screening rig reproduces the baseline it pairs against.
+
+**The laterality comparison measured nothing, and that is a design error on my side, not a null
+result.** s6-s1 and s7-s3 are +0.0016 and +0.0003, and the per-label deltas are uniformly under
+0.0015 — the loss curves are identical to four decimals. The cause: `_SERIES_PRIORITY[0]` is
+`("Sagittal", 1)` and `mirrors_in_plane` is true only for Axial/Coronal, **so at `max_series=1` the
+one series a study contributes is sagittal and is never mirrored.** Only the **257 studies (5.83%)
+that have no sagittal fluid-sensitive series** get a Coronal/Axial series in slot 0 and could be
+affected at all — about 50 of fold 0's 867. The screen was ~94% inert by construction, and roughly
+40 minutes of T4 went on confirming that a no-op is a no-op.
+
+**The laterality fix is therefore still untested, not disproven**, and the experiment that tests it
+is `max_series>=2` — which is the old experiment B, now with a much better rationale than it had:
+coronal series are where MCL and the OA compartments live, and they are only worth adding if they
+are correctly mirrored, which is exactly what was fixed today (51.1% -> 98.5% side coverage).

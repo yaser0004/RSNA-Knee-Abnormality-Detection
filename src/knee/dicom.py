@@ -1,4 +1,5 @@
 import re
+import statistics
 from pathlib import Path
 
 import numpy as np
@@ -121,7 +122,11 @@ def resolve_laterality(header: dict) -> tuple[str | None, str]:
     comparable cases -- IPP is the corner of the first pixel relative to a
     knee-centered coil FOV, not a reliable proxy for body-relative left/right.
     Guessing from it would poison far more than the 2-3% the plan budgets for, so
-    an unresolved study falls through to unknown rather than a wrong guess."""
+    an unresolved study falls through to unknown rather than a wrong guess.
+
+    That still holds for the corner. The *centre*-based route is a different
+    rule and lives in side_from_geometry, which resolve_study_laterality applies
+    only after every tag route here has failed."""
     if header.get("ImageLaterality"):
         return _normalize_side(header["ImageLaterality"]), "ImageLaterality"
 
@@ -138,6 +143,62 @@ def resolve_laterality(header: dict) -> tuple[str | None, str]:
     return None, "unknown"
 
 
+# Inside this distance of the midline the sign of the image centre is no better
+# than chance, so a study centred there stays unresolved rather than guessed.
+_MIDLINE_BAND_MM = 20.0
+
+
+def image_centre_x(header: dict) -> float | None:
+    """Patient-relative x of the image CENTRE, in mm, or None if the geometry
+    tags are absent.
+
+    ImagePositionPatient is the first voxel -- a corner, up to half a field of
+    view from the anatomy -- so its sign is not the side the knee is on. On a
+    knee scanned near the midline the corner lands on the far side of x=0 from
+    the knee itself, which is precisely how the corner form (still asserted
+    against in test_does_not_guess_from_ipp_sign_when_tags_absent) got it wrong.
+    Walking to the centre first removes that offset:
+
+        c = p + r * col_spacing * (Columns / 2) + d * row_spacing * (Rows / 2)
+
+    with r and d the row and column direction cosines of
+    ImageOrientationPatient. +x points to the patient's left."""
+    ipp = header.get("ImagePositionPatient")
+    iop = header.get("ImageOrientationPatient")
+    spacing = header.get("PixelSpacing")
+    rows, cols = header.get("Rows"), header.get("Columns")
+    if not ipp or not iop or not spacing or not rows or not cols:
+        return None
+
+    row_spacing, col_spacing = float(spacing[0]), float(spacing[1])
+    # iop[:3] is the direction of increasing COLUMN index, iop[3:] of increasing
+    # row index -- the pairing with PixelSpacing is crossed, and getting it
+    # backwards is silent on the square images this corpus mostly holds.
+    return float(ipp[0]
+                 + iop[0] * col_spacing * (cols / 2.0)
+                 + iop[3] * row_spacing * (rows / 2.0))
+
+
+def side_from_geometry(series_headers: list[dict]) -> tuple[str | None, str]:
+    """Resolve a study's side from slice geometry alone, for the ~49% of studies
+    carrying no Laterality/ImageLaterality tag at all.
+
+    The median over a study's series is thresholded, not a single series: one
+    series with corrupt geometry should not decide the study. Returns
+    (None, "geometry_midline") inside the band where the sign is chance, and
+    (None, "geometry_unavailable") when no series carries usable geometry --
+    two different reasons to abstain, and a caller measuring coverage needs to
+    tell them apart."""
+    centres = [c for c in (image_centre_x(h) for h in series_headers) if c is not None]
+    if not centres:
+        return None, "geometry_unavailable"
+
+    centre = statistics.median(centres)
+    if abs(centre) < _MIDLINE_BAND_MM:
+        return None, "geometry_midline"
+    return ("L" if centre > 0 else "R"), "geometry"
+
+
 def resolve_study_laterality(series_headers: list[dict]) -> tuple[str | None, str]:
     """Resolve a study's laterality from one representative header per series,
     each resolved independently via resolve_laterality. If every series that
@@ -149,13 +210,27 @@ def resolve_study_laterality(series_headers: list[dict]) -> tuple[str | None, st
     majority to trust. See NOTES.md Phase 2 laterality census."""
     resolved = [resolve_laterality(h) for h in series_headers]
     sides = {side for side, _ in resolved if side is not None}
-    if not sides:
-        return None, "unknown"
-    if len(sides) > 1:
-        return None, "conflict"
-    side = sides.pop()
-    route = next(route for s, route in resolved if s == side)
-    return side, route
+    if len(sides) == 1:
+        side = sides.pop()
+        route = next(route for s, route in resolved if s == side)
+        return side, route
+
+    # No trustworthy tag: either none resolved, or they contradict each other,
+    # which are the same situation for a consumer that has to pick a side.
+    # Geometry is independent evidence rather than a tie-break -- measured over
+    # all 4,407 studies it agrees with the real tag on 99.08% (2162/2182) and
+    # resolves 47.4% of the corpus that carried no tag at all (NOTES 2026-09-05).
+    # It stays strictly a fallback: on the 0.9% where the two disagree the tag
+    # wins, because the tag is the only ground truth there is.
+    geom_side, geom_route = side_from_geometry(series_headers)
+    if geom_route != "geometry_unavailable":
+        return geom_side, geom_route
+
+    # Geometry could not be read either, so report why the *tags* failed rather
+    # than overwriting it with "geometry_unavailable" -- the census counts these
+    # routes, and "the tags contradicted each other" and "there were no tags"
+    # are different data problems.
+    return None, ("conflict" if len(sides) > 1 else "unknown")
 
 
 def read_laterality_header(dcm_path: Path) -> dict:
@@ -165,11 +240,22 @@ def read_laterality_header(dcm_path: Path) -> dict:
     consumer, different fields, not worth merging into one over-general
     reader."""
     ds = pydicom.dcmread(dcm_path, stop_before_pixels=True)
+    ipp = getattr(ds, "ImagePositionPatient", None)
+    iop = getattr(ds, "ImageOrientationPatient", None)
+    spacing = getattr(ds, "PixelSpacing", None)
     return {
         "ImageLaterality": getattr(ds, "ImageLaterality", None),
         "Laterality": getattr(ds, "Laterality", None),
         "SeriesDescription": getattr(ds, "SeriesDescription", None),
         "BodyPartExamined": getattr(ds, "BodyPartExamined", None),
+        # geometry too: resolve_study_laterality falls back to side_from_geometry
+        # off this same header, and reading it in a second pass would mean two
+        # readers to keep in step for one decision
+        "ImagePositionPatient": [float(x) for x in ipp] if ipp is not None else None,
+        "ImageOrientationPatient": [float(x) for x in iop] if iop is not None else None,
+        "PixelSpacing": [float(x) for x in spacing] if spacing is not None else None,
+        "Rows": int(getattr(ds, "Rows", 0)) or None,
+        "Columns": int(getattr(ds, "Columns", 0)) or None,
     }
 
 

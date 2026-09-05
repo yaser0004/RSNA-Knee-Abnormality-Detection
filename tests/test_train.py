@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 import torch
 from torch.utils.data import Dataset
 
@@ -270,3 +271,51 @@ def test_evaluate_returns_correctly_shaped_arrays():
     assert (y_pred >= 0).all() and (y_pred <= 1).all()
     # only label column 0 was ever populated in the synthetic dataset
     assert not any(torch.isnan(torch.tensor(y_true[:, 0])))
+
+
+def test_train_one_epoch_steps_the_scheduler_once_per_batch():
+    """OneCycle is a per-batch schedule -- stepping it per epoch instead would
+    walk 1/N of the way through the cycle and leave the LR near its floor."""
+    torch.manual_seed(0)
+    model = KneeModel(backbone_name="efficientnet_b0", num_labels=len(LABEL_COLUMNS), pretrained=False)
+    loader = torch.utils.data.DataLoader(_TinySyntheticDataset(), batch_size=2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+    calls = []
+
+    class _RecordingScheduler:
+        def step(self):
+            calls.append(1)
+
+    train_one_epoch(model, loader, optimizer, device="cpu", scheduler=_RecordingScheduler())
+
+    assert len(calls) == len(loader)
+
+
+def test_train_one_epoch_accepts_a_scaler_and_still_updates_weights():
+    """The AMP path with the scaler disabled must be numerically the ordinary
+    path, so a CPU box runs the same code the T4 runs."""
+    torch.manual_seed(0)
+    model = KneeModel(backbone_name="efficientnet_b0", num_labels=len(LABEL_COLUMNS), pretrained=False)
+    loader = torch.utils.data.DataLoader(_TinySyntheticDataset(), batch_size=2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    scaler = torch.amp.GradScaler("cpu", enabled=False)
+
+    before = model.head.weight.detach().clone()
+    loss = train_one_epoch(model, loader, optimizer, device="cpu", scaler=scaler)
+    after = model.head.weight.detach().clone()
+
+    assert torch.isfinite(torch.tensor(loss))
+    assert not torch.allclose(before, after)
+
+
+def test_train_one_epoch_scaler_path_matches_the_plain_path():
+    def run(use_scaler):
+        torch.manual_seed(0)
+        model = KneeModel(backbone_name="efficientnet_b0", num_labels=len(LABEL_COLUMNS), pretrained=False)
+        loader = torch.utils.data.DataLoader(_TinySyntheticDataset(), batch_size=2)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+        scaler = torch.amp.GradScaler("cpu", enabled=False) if use_scaler else None
+        return train_one_epoch(model, loader, optimizer, device="cpu", scaler=scaler)
+
+    assert run(True) == pytest.approx(run(False), rel=1e-6)
