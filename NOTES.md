@@ -1362,3 +1362,129 @@ affected at all — about 50 of fold 0's 867. The screen was ~94% inert by const
 is `max_series>=2` — which is the old experiment B, now with a much better rationale than it had:
 coronal series are where MCL and the OA compartments live, and they are only worth adding if they
 are correctly mirrored, which is exactly what was fixed today (51.1% -> 98.5% side coverage).
+
+### Phase 5 screen B: augmentation works, coronal only pays with it, laterality is null (2026-09-06)
+
+Fold 0, schedule frozen at screen A's winner (8 epochs, OneCycle, AMP) so every row differs from
+`s3` in input or augmentation only.
+
+| config | series | lat | aug | full macro | stable-6 | train | gap | delta vs run 1 | min |
+|---|---|---|---|---|---|---|---|---|---|
+| s3 (screen A) | 1 | – | – | 0.8413 | 0.8362 | 0.9788 | +0.143 | +0.0592 | 31.8 |
+| b3 | 1 | – | **yes** | 0.8432 | 0.8420 | 0.9314 | **+0.090** | +0.0650 | 36.3 |
+| b1 | 2 | no | – | 0.8432 | 0.8344 | 0.9668 | +0.132 | +0.0575 | 66.3 |
+| b2 | 2 | yes | – | 0.8417 | 0.8352 | 0.9671 | +0.132 | +0.0583 | 65.7 |
+| **b4** | **2** | **yes** | **yes** | **0.8484** | **0.8442** | 0.9247 | **+0.080** | **+0.0672 [+0.053, +0.081]** | 68.6 |
+
+**1. Augmentation did what the overfit diagnosis predicted.** b3 vs s3 narrows the train-val gap
+0.143 -> 0.090 (train 0.979 -> 0.931) and val rises. The label it helps most is **Fracture
++0.021** — the rarest label (prevalence 0.014) and the one longer training was actively damaging in
+screen A. That is the predicted mechanism, not a coincidence: memorisation hurts the rare labels
+first, so regularisation helps them first.
+
+**2. A second (coronal) series is worth nothing on its own.** b1 vs s3 is +0.0019 full macro, and
+per label it is a wash traded around — Medial Meniscus +0.032 and Medial OA +0.020 against Baker's
+**-0.050** and Lateral Meniscus -0.018. It costs **2x the compute** (66 min vs 32) for that. Taken
+alone this kills the old experiment B.
+
+**3. But coronal composes with augmentation, and that is the finding.** b4 vs b3 adds the second
+series *given* augmentation and gains +0.0052 full macro, concentrated exactly where the anatomy
+says it should be: **Lateral Meniscus +0.037, Medial Meniscus +0.029, MCL +0.027, Lateral OA
++0.019**. Without augmentation the extra plane just gave the model more to memorise (train 0.967);
+with it, the plane's information is actually used. **The interaction is why b1 read as a failure and
+b4 does not** — and it is a warning about one-variable screening, which would have discarded the
+coronal series on b1 alone.
+
+**4. The laterality fix is null.** b2 - b1 is +0.0008 stable-6 and **-0.0014 full macro**. The
+medial/lateral pairs move the right way but trivially (Medial Meniscus +0.011, Lateral Meniscus
++0.006, Lateral OA +0.004) and MCL moves the wrong way (-0.027). At one fold these are noise.
+
+**So the day's biggest structural fix bought no measurable accuracy.** The honest reading: 99.08%
+agreement and 51.1% -> 98.5% coverage are real and verified, and the pixels genuinely change for
+~47% of studies — but the model apparently was not relying on canonical medial/lateral orientation
+much in the first place, at least not at `efficientnet_b0` capacity with mean-pooling over slices.
+It is kept because it costs nothing at training time and because **the submission path already
+resolves test-study sides through the same function**, so training and inference stay consistent.
+It may matter more once the head can actually attend per-plane rather than mean-pool everything.
+
+**Confirming b4 on 5 folds** (~5.75h): it wins the competition's own metric, the per-label pattern
+is mechanistically coherent rather than diffuse, and Efficiency Track is on "track, don't constrain"
+so the 2x inference is acceptable for now. Caveat recorded before the run: b4 - b3 is +0.0052 full
+macro on **one fold**, and the two paired CIs ([+0.052,+0.078] vs [+0.053,+0.081]) overlap almost
+entirely, so this is a judgement on mechanism, not a measured separation.
+
+### Phase 5 confirmed on 5 folds: pooled OOF 0.8523, gold transfer 0.8189 (2026-09-06)
+
+Config `phase5_confirm_efficientnet_b0_s2x16_e8_onecycle_amp_lat1_aug1` — b4 — over all five
+`primary_v2` folds, gold excluded from both sides of every split. ~67 min/fold, 5.6 h total.
+Per-fold macro 0.8484 / 0.8406 / 0.8439 / 0.8761 / 0.8623.
+
+**Tier 1, the promotion decision (pooled OOF vs pseudo-labels, full 12-label macro, n=4,349):**
+
+| | run 1 | Phase 5 | delta |
+|---|---|---|---|
+| pooled OOF macro | 0.7779 | **0.8523** | **+0.0744**, 95% CI **[+0.0669, +0.0820]** |
+
+CI excludes zero: **promoted**. All twelve labels improve — ACL +0.114, Medial Meniscus +0.114,
+Lateral Meniscus +0.096, Lateral OA +0.089, Contusion +0.086, Baker's +0.076, Medial OA +0.071,
+Fracture +0.066, MCL +0.062, PF OA +0.049, Synovitis +0.049, Effusion +0.020.
+
+**Tier 2, gold transfer (58 studies, real rubric labels, the LB predictor): 0.7252 -> 0.8189.**
+
+| label | run 1 gold | Phase 5 gold | delta |
+|---|---|---|---|
+| Lateral OA | 0.6132 | 0.8472 | **+0.234** |
+| Medial Meniscus | 0.6298 | 0.8486 | **+0.219** |
+| Medial OA | 0.7922 | 0.9504 | +0.158 |
+| **MCL** | **0.5034** | **0.6259** | **+0.123** |
+| ACL | 0.8051 | 0.9118 | +0.107 |
+| Contusion | 0.8084 | 0.9055 | +0.097 |
+| Baker's | 0.7355 | 0.8279 | +0.092 |
+| PF OA | 0.6821 | 0.7722 | +0.090 |
+| Fracture | 0.7056 | 0.7764 | +0.071 |
+| Lateral Meniscus | 0.7081 | 0.7280 | +0.020 |
+| Effusion | 0.9391 | 0.9193 | **-0.020** |
+| Synovitis | 0.7802 | 0.7133 | **-0.067** |
+
+**MCL is no longer random** (0.5034 -> 0.6259) and the three worst labels of run 1 — MCL, Lateral OA,
+Medial Meniscus — are the three that gained most. That is the coronal hypothesis behaving as
+predicted **on the tier that matters**, the one scored against labels read from images rather than
+text.
+
+**What it does not license is attributing that to the laterality fix.** This run differs from run 1
+in five variables at once (epochs, schedule, AMP, augmentation, second series). Screen B measured
+laterality *in isolation* at -0.0014 full macro, and nothing here contradicts that; the coronal
+*plane* is doing the work, not the mirroring. Two labels went backwards — Synovitis -0.067 and
+Effusion -0.020, both sagittal findings that run 1 read well — which is consistent with a fixed
+16-slice budget now split across two planes rather than spent on one.
+
+**Pre-registered LB reading (NOTES 2026-09-05): >= 0.82 means the recipe was the gap.** Run 1's
+gold 0.7252 preceded LB 0.763, an offset of +0.038; the same offset on 0.8189 would put this near
+0.857. That extrapolation rests on one point at n=58 and should not be trusted beyond "expect a
+large jump" — the pre-registered bands, not the point estimate, are what this gets read against.
+
+### Phase 5 submission notebook run: 0 fallbacks, and the laterality guard fired on the test set (2026-09-06)
+
+`notebooks/phase5-submit/`, version 1, T4, 3 visible studies:
+
+- **prep 2.605 s/study** (p95 3.981), **forward 0.559 s/study for all five fold models** on GPU —
+  **3.16 s/study end to end**, so roughly **68 min per 1,300 hidden studies**, still prep-bound and
+  far inside the 9 h cap.
+- **Doubling the input series cost almost nothing at inference.** Phase 4 measured 3.09 s/study at
+  `max_series=1`; this is 3.16 s at `max_series=2`. The forward went 0.428 -> 0.559 s and prep did
+  not move at all, because prep already decoded four series in both cases — the read config changes
+  what the loader *returns*, not what prep *does*. Worth knowing for the Efficiency Track: the
+  second plane is nearly free at inference and only expensive at training time.
+- **0 of 3 studies hit the 0.5 fallback** (the local sample only ships DICOMs for 1 of 3, so the
+  local dry run showed 2 fallbacks; the competition mount has all three).
+- **`laterality routes on the test set: {'Laterality': 1, 'geometry': 2}`** — the geometry fallback
+  is firing on hidden-test studies, two of three. This is the check that matters most in this
+  notebook: it is direct evidence that training and inference resolve sides by the same rule, which
+  is the mismatch that would otherwise have been invisible.
+- Mean predictions track the training positive rates and preserve their ordering (Medial Meniscus
+  0.141 vs 0.319, Effusion 0.120 vs 0.262, Fracture 0.005 vs 0.014). n=3, so a smoke signal.
+
+**Submission mechanism, re-confirmed rather than re-learned:** `kaggle competitions submit -f` is
+rejected with a bare 400 on this Code Competition (NOTES 2026-08-08). The submission has to be made
+from the notebook's **Output tab -> "Submit to Competition"**, which links that notebook version's
+output file and privately re-runs it against the real hidden test set.

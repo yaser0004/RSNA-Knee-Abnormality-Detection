@@ -18,13 +18,28 @@ gold transfer 0.7252 with the 58 gold studies excluded from both sides of every 
 from Phase 1's 0.558 — clearing the pre-registered 0.70 band, so the inference path is verified.
 That is rank 2187/2936: the field's median is 0.899 and 10th place is 0.947, so the pseudo-label
 thesis is confirmed while the model itself — 1 epoch, one series, `efficientnet_b0` — is barely
-trained; **Phase 5 in progress** — public-notebook recon done (the 0.934 cluster is one DINOv2
-notebook at 10 epochs with physical-scale sampling and rank-mean ensembling), and two of its claims
-tested against our data: the geometry laterality route we rejected in Phase 0 was rejected for
-reading the image *corner* instead of its *centre*, and shared reports leak across 4% of our folds.
-Two kernels are out: `notebooks/phase5-laterality/` (CPU, does the centre route hold over all 4,407
-studies?) and `notebooks/phase5-screen/` (GPU, fold-0 screen of the epoch ladder and AMP).
-See `NOTES.md` 2026-09-05.**
+trained; **Phase 5 complete and promoted** — pooled OOF **0.8523** against run 1's 0.7779, paired
+delta **+0.0744 (95% CI [+0.0669, +0.0820])**, gold transfer **0.8189** against 0.7252, all twelve
+labels improved, and submitted from `notebooks/phase5-submit/`.**
+
+Phase 5 came out of reading the top public notebook for intel (not code): it runs DINOv2 at 10
+epochs with physical-scale sampling and rank-mean ensembling. Two of its claims were tested against
+our own data, and the phase was re-ranked around what they showed. What actually paid:
+
+| lever | effect | where |
+|---|---|---|
+| 1 -> 8 epochs + OneCycle | **+0.059** fold-0 macro | `notebooks/phase5-screen/` |
+| augmentation | +0.006, train-val gap 0.143 -> 0.090 | `notebooks/phase5-screen-b/` |
+| 2nd (coronal) series **with** augmentation | +0.005, concentrated in coronal labels | `notebooks/phase5-screen-b/` |
+| geometry laterality | side coverage 51.1% -> 98.5%, but **null on accuracy** | `notebooks/phase5-laterality/` |
+
+The laterality result is worth stating plainly: the Phase 0 `ImagePositionPatient` rule was rejected
+for reading the image *corner* rather than its *centre*, and the centre form agrees with the real
+tag on **99.08%** of the 2,182 studies that carry one, recovering a side for 47.4% of the corpus
+that had none. It cost no re-prep, because Phase 2 stored pixels unmirrored. It also bought no
+measurable accuracy at this model's capacity — it is kept because it is free and because the
+submission path resolves test-study sides through the same function, so training and inference
+agree. See `NOTES.md` 2026-09-05/06.
 
 Phase 1: `efficientnet_b0`, single sagittal fluid-sensitive series, 16 slices, trained on lexical
 (keyword-derived) labels for the 4 labels with any coverage (ACL, Medial Meniscus, Effusion,
