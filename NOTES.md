@@ -1488,3 +1488,24 @@ large jump" — the pre-registered bands, not the point estimate, are what this 
 rejected with a bare 400 on this Code Competition (NOTES 2026-08-08). The submission has to be made
 from the notebook's **Output tab -> "Submit to Competition"**, which links that notebook version's
 output file and privately re-runs it against the real hidden test set.
+
+### Correction: the CLI *can* submit to this Code Competition (2026-09-06)
+
+The 2026-08-08 entry concluded that "`kaggle competitions submit -f <file>` is rejected outright
+(400) ... the actual mechanism is the web UI's Submit to Competition panel, not the CLI." **The
+first half is right and the conclusion is too broad.** A raw *local file* upload is rejected, which
+is what was tested. But `kaggle competitions submit` also takes `-k` and `-v`, and that form works:
+
+```
+kaggle competitions submit -c rsna-knee-abnormality-detection \
+  -k mohammadyaserhussain/knee-phase5-submit -v 1 -f submission.csv -m "<message>"
+```
+
+`-f` here is not a path — for a code competition it names *the output file the kernel produced*, and
+`-k`/`-v` name the notebook version to link. Phase 5 went in this way (submission 56047536) and
+registered as PENDING with the daily quota decremented, exactly as the web panel does.
+
+The generalisation error is the lesson worth keeping: one failing invocation was recorded as "the
+CLI cannot do this" rather than "this *form* of the CLI call cannot do this", and that stood
+unchallenged for a month, adding a manual step to every submission. `--help` on the subcommand
+would have shown `-k/-v` at any point.
