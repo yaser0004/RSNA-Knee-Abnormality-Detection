@@ -1,3 +1,4 @@
+import hashlib
 import math
 import re
 
@@ -5,6 +6,20 @@ import numpy as np
 import pandas as pd
 
 from knee.infer import LABEL_COLUMNS
+
+
+def report_group_key(text) -> str:
+    """Group key for fold assignment: studies sharing a report must not
+    straddle a fold boundary, or the OOF is partly scored against text the
+    model already trained on.
+
+    Case and whitespace are normalized away before hashing. 'Byte-identical'
+    was the first definition tried (NOTES 2026-09-05) and it undercounts: raw
+    bytes find 46 duplicate groups over 177 studies, .strip() finds 49/183, and
+    this key finds 54/204. Two reports differing only in case or run-length of
+    whitespace are the same report and leak identically, so the conservative
+    key is the correct one here."""
+    return hashlib.sha1(re.sub(r"\s+", " ", str(text).strip().lower()).encode("utf-8")).hexdigest()
 
 # Phase 1 baseline: multilingual keyword/regex rules over report text (Tier 3 in
 # the plan's Label hierarchy). Only English and Spanish patterns are seeded here
@@ -303,3 +318,56 @@ def score_report_with_llm(report_text: str, generate_fn) -> dict[str, tuple[floa
         score, weight = score_from_top_logprobs(generate_fn(prompt))
         scores[label] = (float("nan") if score is None else score, weight)
     return scores
+
+
+def confidence_from_agreement(
+    sources: list[pd.DataFrame],
+    labels: list[str],
+    floor: float = 0.1,
+) -> pd.DataFrame:
+    """Per-study, per-label training weight from how much the label sources agree.
+
+    The training target is soft, so per-label uncertainty is already expressed --
+    but soft BCE cannot discount a row: a study the sources split on carries an
+    irreducible loss floor and teaches the model to answer 0.5 there. A sample
+    weight is the only place that doubt can be spent, which is why this is
+    separate from the target rather than folded into it. It also uses the
+    multi-source information *without* making a blend the target, which was
+    rejected for a different reason (NOTES 2026-09-07).
+
+    Agreement, not decisiveness: the weight falls with the spread across sources,
+    not with distance from 0.5. A study every source calls a confident negative is
+    a well-labelled study and should carry full weight.
+
+    Weights are normalised to mean 1 per label. Without that, down-weighting also
+    shrinks the mean gradient, and a screen would be measuring "confidence
+    weighting plus a lower effective learning rate" under the same OneCycle.
+
+    `floor` keeps maximally disputed rows in the loss. Dropping one is a stronger
+    claim than doubting it -- sources disagreeing about a finding does not mean
+    the images carry no signal for it."""
+    if not sources:
+        raise ValueError("no label sources to compare")
+
+    index = sources[0].index
+    for frame in sources[1:]:
+        index = index.union(frame.index)
+
+    weights = pd.DataFrame(index=index)
+    for label in labels:
+        stack = np.vstack([
+            pd.to_numeric(frame.reindex(index).get(label), errors="coerce").to_numpy(float)
+            if label in frame.columns else np.full(len(index), np.nan)
+            for frame in sources
+        ])
+        n_rated = np.sum(~np.isnan(stack), axis=0)
+        with np.errstate(invalid="ignore"):
+            spread = np.nanstd(stack, axis=0)
+        # one source cannot disagree with itself; a row only it rates carries no
+        # agreement information, so it is left alone rather than assumed certain
+        spread = np.where(n_rated >= 2, spread, 0.0)
+        # spread of values in [0, 1] tops out at 0.5 (an even split at the
+        # extremes), so 1 - 2*spread lands in [0, 1] before the floor
+        w = np.clip(1.0 - 2.0 * spread, floor, 1.0)
+        weights[label] = w / w.mean()
+    return weights

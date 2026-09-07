@@ -1,0 +1,29 @@
+{
+ "id": "mohammadyaserhussain/knee-phase7-confirm-c3",
+ "title": "knee-phase7-confirm-c3",
+ "code_file": "knee-phase7-confirm-c3.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "true",
+ "enable_tpu": "false",
+ "enable_internet": "true",
+ "machine_shape": "NvidiaTeslaT4",
+ "dataset_sources": [
+  "mohammadyaserhussain/rsna-knee-src",
+  "stevenleehans/rsna-knee-llm-report-labels",
+  "pilkwang/rsna-knee-llm-labels",
+  "lixin73/rsna-knee-llm-report-labels-sol56"
+ ],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [
+  "mohammadyaserhussain/knee-phase6-prep-shard0",
+  "mohammadyaserhussain/knee-phase6-prep-shard1",
+  "mohammadyaserhussain/knee-phase6-prep-shard2",
+  "mohammadyaserhussain/knee-phase6-prep-shard3",
+  "mohammadyaserhussain/knee-phase3-label-consume"
+ ],
+ "model_sources": []
+}

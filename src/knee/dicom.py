@@ -57,6 +57,239 @@ def select_series(series_df: pd.DataFrame, study_uid: str, max_series: int = 4) 
     return selected
 
 
+def sequence_weighting(
+    repetition_time: str | None,
+    echo_time: str | None,
+    scanning_sequence: str | None,
+) -> str:
+    """Contrast weighting of one series, recovered from its header: "T1", "PD",
+    "T2", "GRE" or "unknown".
+
+    Exists because train_series.csv cannot express this. Its Fluid_Sensitive and
+    Fat_Suppression columns are identical on all 24,371 rows, so SLOTS collapses
+    T1 and non-fat-suppressed PD/T2 into one _STRUCT slot per plane -- two
+    different tissue contrasts arriving at one attention position. Whether that
+    costs anything was a counting question; this is what counted it, and
+    SLOTS_V3 is what the count led to.
+
+    The partition is the standard knee-MRI one: short TR is T1, long TR with a
+    short TE is proton-density, long TR with a long TE is T2. Gradient echo is
+    identified from ScanningSequence and reported separately, because its TR/TE
+    do not carry the spin-echo meaning and the thresholds would mislabel it
+    rather than merely miss it.
+
+    No SeriesDescription parsing, deliberately: it is free text, and a rule fitted
+    to how the training set phrases it has no guarantee on the hidden test set --
+    the same argument that kept SLOTS on the delivered CSV columns.
+
+    A missing or unparseable TR/TE returns "unknown" rather than a default. A
+    silent fallback here would be the fixed-pixel defect again: wrong on only the
+    rows nobody can check, and invisible in the aggregate."""
+    if scanning_sequence:
+        tokens = re.split(r"[^A-Za-z]+", scanning_sequence.upper())
+        if "GR" in tokens:
+            return "GRE"
+
+    try:
+        tr = float(repetition_time)
+        te = float(echo_time)
+    except (TypeError, ValueError):
+        return "unknown"
+
+    if tr < _TR_T1_MAX_MS:
+        return "T1"
+    return "T2" if te >= _TE_T2_MIN_MS else "PD"
+
+
+# Thresholds in milliseconds. Standard knee-MRI values rather than tuned ones:
+# tuning them against our own corpus would fit the training distribution, and
+# this rule has to hold on the hidden test set too.
+_TR_T1_MAX_MS = 800.0
+_TE_T2_MIN_MS = 40.0
+
+
+# Six input slots: three acquisition planes crossed with the one weighting axis
+# train_series.csv actually carries. Fluid_Sensitive and Fat_Suppression are
+# identical on all 24,371 rows (checked 2026-09-06), so as delivered they are one
+# column under two names, and a slot table cannot separate T1 from
+# non-fat-suppressed PD/T2 without recovering TR/TE/ScanningSequence from the
+# headers.
+# ponytail: CSV-only slots, no header parsing -- works for the hidden test set
+# from the same columns and cannot fail on an unusual acquisition. Ceiling: a
+# _STRUCT slot mixes T1 with non-suppressed PD/T2, which carry different tissue
+# contrast. That ceiling was measured on 2026-09-07 and it is real: SAG_STRUCT
+# holds 1,645 T1, 1,702 PD, 1,224 T2 and 388 GRE. SLOTS_V3 below is the upgrade.
+# This table stays until v3's re-baseline lands -- it is the artifact behind the
+# scored 0.905 submission, the same reason prep v1 outlived prep v2's arrival.
+SLOTS = [
+    ("SAG_FLUID", "Sagittal", 1),
+    ("COR_FLUID", "Coronal", 1),
+    ("AX_FLUID", "Axial", 1),
+    ("SAG_STRUCT", "Sagittal", 0),
+    ("COR_STRUCT", "Coronal", 0),
+    ("AX_STRUCT", "Axial", 0),
+]
+
+
+def select_slots(series_df: pd.DataFrame, study_uid: str) -> dict[str, str | None]:
+    """Map each slot to one of the study's series, or None when the study has
+    no series for it.
+
+    Deliberately no substitution: an empty slot stays empty and the presence
+    mask carries that, because filling a missing plane from a different one
+    would put a single acquisition in two slots and let the model divide its
+    attention across two copies of it while the mask claimed two views. This
+    is the difference from select_series, which ranks and backfills.
+
+    Slot predicates partition the series (a series has exactly one plane and
+    one Fluid_Sensitive value), so no series can land in two slots. Ties are
+    broken on the UID so a study prepped in two different shard orders gives
+    the same artifact."""
+    study_series = series_df[series_df["StudyInstanceUID"] == study_uid]
+    slots: dict[str, str | None] = {}
+    for name, plane, fluid_sensitive in SLOTS:
+        match = study_series[
+            (study_series["Anatomical_Plane"] == plane)
+            & (study_series["Fluid_Sensitive"] == fluid_sensitive)
+        ]
+        uids = sorted(match["SeriesInstanceUID"])
+        slots[name] = uids[0] if uids else None
+    return slots
+
+
+# v3 slot table: plane x fat-suppression x weighting, from the 2026-09-07 census.
+#
+# The Phase 6 reading -- "Fluid_Sensitive and Fat_Suppression are identical on all
+# 24,371 rows, so the CSV carries one axis" -- was a correct observation with the
+# wrong conclusion. The CSV column encodes *fat suppression*; TR/TE encode
+# *weighting*; they are orthogonal, and SLOTS above uses one of them. The cost was
+# measured: SAG_STRUCT alone carried 1,645 T1, 1,702 PD, 1,224 T2 and 388 GRE into
+# a single attention position, with no consistent tissue contrast there to route to.
+#
+# Membership rule: every combination at >=10% study fill, plus every _UNK
+# combination regardless of fill. GRE (764 series) is excluded -- its TR/TE follow
+# neither the T1 nor the T2 rule and folding it into either would be a silent
+# mislabel, and filing it under UNK would put a positively-identified class into
+# the residual bucket. It costs 19 studies (0.4%) a whole plane and none of them
+# all their slots. Revisit only if the 19-vs-6 screen shows more positions help.
+#
+# THE _UNK TIER IS LOAD-BEARING, not padding. 1,206 series (4.9%) carry no
+# recoverable TR/TE, and 238 studies (5.4%) consist *entirely* of such series --
+# complete 5-to-7-series exams whose headers were stripped. Under a weighting-only
+# table those 238 get zero slots: dropped from training and answered with the 0.5
+# fallback at inference. No threshold fixes that; the bucket has to exist. It is
+# also what contains this table's one regression against v2 -- v2 needed no header
+# parsing and so could not be surprised by the hidden test set, whereas here an
+# unreadable test series lands in a slot the model has actually been trained on
+# rather than in a guess.
+SLOTS_V3 = [
+    ("SAG_FS_PD", "Sagittal", 1, "PD"),
+    ("SAG_FS_T2", "Sagittal", 1, "T2"),
+    ("SAG_NOFS_T1", "Sagittal", 0, "T1"),
+    ("SAG_NOFS_PD", "Sagittal", 0, "PD"),
+    ("SAG_NOFS_T2", "Sagittal", 0, "T2"),
+    ("COR_FS_PD", "Coronal", 1, "PD"),
+    ("COR_FS_T2", "Coronal", 1, "T2"),
+    ("COR_NOFS_T1", "Coronal", 0, "T1"),
+    ("COR_NOFS_T2", "Coronal", 0, "T2"),
+    ("AXI_FS_PD", "Axial", 1, "PD"),
+    ("AXI_FS_T2", "Axial", 1, "T2"),
+    ("AXI_NOFS_T1", "Axial", 0, "T1"),
+    ("AXI_NOFS_T2", "Axial", 0, "T2"),
+    ("SAG_FS_UNK", "Sagittal", 1, "UNK"),
+    ("SAG_NOFS_UNK", "Sagittal", 0, "UNK"),
+    ("COR_FS_UNK", "Coronal", 1, "UNK"),
+    ("COR_NOFS_UNK", "Coronal", 0, "UNK"),
+    ("AXI_FS_UNK", "Axial", 1, "UNK"),
+    ("AXI_NOFS_UNK", "Axial", 0, "UNK"),
+]
+
+
+def select_slots_v3(
+    series_df: pd.DataFrame,
+    study_uid: str,
+    weighting_by_series: dict[str, str],
+) -> dict[str, str | None]:
+    """select_slots over SLOTS_V3, with the weighting axis supplied per series.
+
+    Weighting cannot come from the delivered CSV, so the caller reads one header
+    per series and passes sequence_weighting's answer.
+
+    UNK means one thing: the weighting could not be recovered. A series the caller
+    never classified counts as that. **GRE does not**, and is dropped instead --
+    it is a contrast we positively identified and chose not to model, so filing it
+    under "unknown" would put a known class into the residual bucket and rebuild
+    the conflation this table exists to remove. The cost was measured before the
+    table was fixed: 764 series, 19 studies (0.4%) losing a whole plane, none
+    losing all their slots.
+
+    Empty slots stay empty and the presence mask carries that -- no substitution,
+    exactly as in select_slots."""
+    study_series = series_df[series_df["StudyInstanceUID"] == study_uid]
+    slots: dict[str, str | None] = {}
+    for name, plane, fluid_sensitive, weighting in SLOTS_V3:
+        match = study_series[
+            (study_series["Anatomical_Plane"] == plane)
+            & (study_series["Fluid_Sensitive"] == fluid_sensitive)
+        ]
+        uids = sorted(
+            uid for uid in match["SeriesInstanceUID"]
+            if _slot_weighting(weighting_by_series.get(uid)) == weighting
+        )
+        slots[name] = uids[0] if uids else None
+    return slots
+
+
+def _slot_weighting(recovered: str | None) -> str:
+    """Map sequence_weighting's answer onto the slot table's weighting axis.
+    T1/PD/T2 pass through and an unrecoverable weighting becomes UNK. "GRE" is
+    returned unchanged, which matches no slot -- see select_slots_v3."""
+    if recovered in ("T1", "PD", "T2", "GRE"):
+        return recovered
+    return "UNK"
+
+
+# The outermost slices of a knee series are mostly soft tissue outside the joint,
+# so groups are spread over a central band rather than the whole stack.
+_SLICE_BAND = (0.20, 0.80)
+SLICE_GROUP = 3
+
+
+def select_slice_groups(
+    ordered_headers: list[dict],
+    n_groups: int,
+    group_size: int = SLICE_GROUP,
+    band: tuple[float, float] = _SLICE_BAND,
+) -> list[list[dict]]:
+    """Pick n_groups runs of `group_size` *physically adjacent* slices, spread
+    across the central band of an already-ordered stack.
+
+    The adjacency is the point: the three slices become one encoder input's
+    three channels, which gives it local through-plane context a single slice
+    replicated three times cannot. select_k_evenly_spaced cannot express this --
+    its picks are maximally far apart by construction.
+
+    A stack shorter than the group is clamped rather than rejected: indices run
+    off the ends onto the edge slice, so a one-slice series still yields full
+    groups. A thin series is not an unusable one."""
+    n = len(ordered_headers)
+    if n == 0:
+        raise ValueError("select_slice_groups needs at least one slice")
+    lo = min(max(0, round(band[0] * n)), n - 1)
+    hi = min(max(lo, round(band[1] * n)), n - 1)
+    centres = np.linspace(lo, hi, num=n_groups) if n_groups > 1 else [(lo + hi) / 2]
+
+    half = group_size // 2
+    groups = []
+    for centre in centres:
+        start = int(round(centre)) - half
+        groups.append([
+            ordered_headers[min(max(start + offset, 0), n - 1)]
+            for offset in range(group_size)
+        ])
+    return groups
+
+
 def _slice_normal_projection(header: dict) -> float | None:
     ipp = header.get("ImagePositionPatient")
     iop = header.get("ImageOrientationPatient")
@@ -295,6 +528,16 @@ def _read_slice_header(dcm_path: Path) -> dict:
         "PhotometricInterpretation": _plain_str(getattr(ds, "PhotometricInterpretation", None)),
         "TransferSyntaxUID": _plain_str(getattr(file_meta, "TransferSyntaxUID", None)),
         "PatientSex": _plain_str(getattr(ds, "PatientSex", None)),
+        # Weighting tags. Nothing reads these yet: the slot table (SLOTS) runs off
+        # train_series.csv, whose Fluid_Sensitive and Fat_Suppression columns are
+        # identical and so cannot separate T1 from non-fat-suppressed PD/T2.
+        # Recorded into prep's per-series meta on a header read that already
+        # happens, so that split can be measured later without re-prepping 4,407
+        # studies just to obtain the tags.
+        "RepetitionTime": _plain_str(getattr(ds, "RepetitionTime", None)),
+        "EchoTime": _plain_str(getattr(ds, "EchoTime", None)),
+        "ScanningSequence": _plain_str(getattr(ds, "ScanningSequence", None)),
+        "SeriesDescription": _plain_str(getattr(ds, "SeriesDescription", None)),
         "path": dcm_path,
     }
 

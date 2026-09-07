@@ -9,10 +9,12 @@ import numpy as np
 from knee.dataset import (
     CachedDataset,
     KneeStudyDataset,
+    PreppedSlotDataset,
     PreppedStudyDataset,
     StudyDecodeError,
     augment_volume,
 )
+from knee.dicom import SLICE_GROUP, SLOTS
 from knee.infer import LABEL_COLUMNS, build_submission
 from knee.prep import save_study_npz
 
@@ -399,3 +401,176 @@ def test_prepped_dataset_augments_only_when_asked(tmp_path):
     assert torch.equal(plain, again), "the un-augmented path must stay deterministic"
     assert not torch.equal(plain, augmented)
     assert augmented.shape == plain.shape
+
+
+# --- Phase 6: slot-structured loading with a presence mask ----------------------
+
+
+def _slot_artifact(tmp_path, uid="study", filled=("SAG_FLUID", "COR_FLUID"), n_groups=2,
+                   size=8, side="L"):
+    """Write a v2 artifact directly, so these tests exercise the loader rather
+    than the DICOM path."""
+    slot_slices, series_meta = {}, {}
+    for i, name in enumerate(filled):
+        slot_slices[name] = [
+            np.full((size, size), (i * 10 + j) % 256, dtype=np.uint8)
+            for j in range(n_groups * SLICE_GROUP)
+        ]
+        series_meta[f"series-{i}"] = {"slot": name, "n_slices_stored": len(slot_slices[name])}
+    meta = {
+        "StudyInstanceUID": uid, "side": side, "route": "Laterality", "is_gold": False,
+        "slots": {name: (f"series-{filled.index(name)}" if name in filled else None)
+                  for name, _, _ in SLOTS},
+        "series": series_meta,
+    }
+    save_study_npz(tmp_path / f"{uid}.npz", slot_slices, meta)
+    return uid
+
+
+def test_slot_dataset_returns_a_real_slot_axis_and_a_presence_mask(tmp_path):
+    uid = _slot_artifact(tmp_path, filled=("SAG_FLUID", "AX_FLUID"), n_groups=2, size=8)
+
+    ds = PreppedSlotDataset([uid], tmp_path, n_groups=2, out_size=8)
+    image, mask, labels, _ = ds[0]
+
+    # (slot, group, channel, H, W) -- the flat volume v1 returned could not
+    # express "this study has no coronal series" at all
+    assert tuple(image.shape) == (len(SLOTS), 2, SLICE_GROUP, 8, 8)
+    assert tuple(mask.shape) == (len(SLOTS),)
+    assert mask.dtype == torch.bool
+
+
+def test_slot_dataset_marks_an_absent_slot_false_and_zeroes_it(tmp_path):
+    uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",))
+
+    image, mask, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=2, out_size=8)[0]
+
+    names = [name for name, _, _ in SLOTS]
+    assert bool(mask[names.index("SAG_FLUID")]) is True
+    for absent in ("COR_FLUID", "AX_FLUID", "SAG_STRUCT", "COR_STRUCT", "AX_STRUCT"):
+        i = names.index(absent)
+        assert bool(mask[i]) is False
+        assert float(image[i].abs().sum()) == 0.0
+
+
+def test_slot_dataset_puts_three_adjacent_stored_slices_in_the_channel_axis(tmp_path):
+    # the point of storing contiguous groups: the channels carry local
+    # through-plane context, not one slice replicated three times
+    uid = "adjacent"
+    slot_slices = {"SAG_FLUID": [np.full((4, 4), v, dtype=np.uint8) for v in (10, 20, 30)]}
+    meta = {"StudyInstanceUID": uid, "side": None, "route": "unknown", "is_gold": False,
+            "slots": {name: ("s0" if name == "SAG_FLUID" else None) for name, _, _ in SLOTS},
+            "series": {"s0": {"slot": "SAG_FLUID", "n_slices_stored": 3}}}
+    save_study_npz(tmp_path / f"{uid}.npz", slot_slices, meta)
+
+    image, _, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=1, out_size=4)[0]
+
+    channels = [float(image[0, 0, c].mean() * 255) for c in range(SLICE_GROUP)]
+    assert channels == pytest.approx([10, 20, 30], abs=1.0)
+    assert len(set(channels)) == 3, "channels must differ -- not one slice tripled"
+
+
+def test_slot_dataset_orders_slots_by_the_table_not_by_storage_order(tmp_path):
+    uid = _slot_artifact(tmp_path, filled=("AX_STRUCT", "SAG_FLUID"))
+
+    _, mask, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=2, out_size=8)[0]
+
+    names = [name for name, _, _ in SLOTS]
+    assert bool(mask[names.index("SAG_FLUID")]) and bool(mask[names.index("AX_STRUCT")])
+    assert not bool(mask[names.index("COR_FLUID")])
+
+
+def test_slot_dataset_mirrors_only_the_planes_where_left_right_is_in_plane(tmp_path):
+    # sagittal's horizontal axis is anterior-posterior, so flipping it mirrors
+    # the knee front-to-back -- the bug mirrors_in_plane exists to prevent
+    uid = "sided"
+    asym = np.tile(np.arange(8, dtype=np.uint8) * 30, (8, 1))
+    slot_slices = {name: [asym.copy() for _ in range(SLICE_GROUP)]
+                   for name in ("SAG_FLUID", "COR_FLUID")}
+    meta = {"StudyInstanceUID": uid, "side": "L", "route": "Laterality", "is_gold": False,
+            "slots": {name: (name if name in slot_slices else None) for name, _, _ in SLOTS},
+            "series": {name: {"slot": name, "n_slices_stored": SLICE_GROUP}
+                       for name in slot_slices}}
+    save_study_npz(tmp_path / f"{uid}.npz", slot_slices, meta)
+
+    image, _, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=1, out_size=8)[0]
+
+    names = [name for name, _, _ in SLOTS]
+    sag = image[names.index("SAG_FLUID"), 0, 0].numpy()
+    cor = image[names.index("COR_FLUID"), 0, 0].numpy()
+    # atol covers the artifact's JPEG q=92 round trip, which perturbs a smooth
+    # gradient by a few thousandths; a flip would move it by whole steps
+    assert np.allclose(sag, asym / 255.0, atol=0.02), "sagittal must not be flipped"
+    assert np.allclose(cor, np.fliplr(asym) / 255.0, atol=0.02), "coronal must be flipped"
+    assert sag[0, 0] < sag[0, -1] and cor[0, 0] > cor[0, -1]
+
+
+def test_slot_dataset_downsamples_to_the_requested_size(tmp_path):
+    # artifacts are stored at 336 so resolution stays screenable without a
+    # second prep run
+    uid = _slot_artifact(tmp_path, size=16)
+
+    image, _, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=2, out_size=8)[0]
+
+    assert image.shape[-2:] == (8, 8)
+
+
+def test_slot_dataset_spreads_fewer_groups_across_the_stored_band(tmp_path):
+    # Artifacts store 5 groups across the 0.20-0.80 band. A cell asking for 3
+    # must get groups spread over that band, not its first three -- otherwise
+    # "fewer groups" is confounded with "only the bottom of the knee", and a
+    # screen varying n_groups would measure the wrong thing.
+    uid = "spread"
+    # 5 groups of 3, each group uniformly valued by its index
+    slot_slices = {"SAG_FLUID": [np.full((4, 4), g * 50, dtype=np.uint8)
+                                 for g in range(5) for _ in range(SLICE_GROUP)]}
+    meta = {"StudyInstanceUID": uid, "side": None, "route": "unknown", "is_gold": False,
+            "slots": {n: ("s0" if n == "SAG_FLUID" else None) for n, _, _ in SLOTS},
+            "series": {"s0": {"slot": "SAG_FLUID", "n_slices_stored": 15}}}
+    save_study_npz(tmp_path / f"{uid}.npz", slot_slices, meta)
+
+    image, _, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=3, out_size=4,
+                                        slots=["SAG_FLUID"])[0]
+
+    groups = [round(float(image[0, g, 0].mean() * 255) / 50) for g in range(3)]
+    assert groups == [0, 2, 4], f"expected the band's ends and middle, got {groups}"
+
+
+class TestSlotDatasetSampleWeights:
+    """PreppedSlotDataset optionally yields a per-label sample weight alongside
+    the target, so the confidence screen can discount rows the label sources
+    disagree about. Without a weights_df the batch shape is unchanged -- every
+    config screened so far pairs against runs that produced the 4-tuple."""
+
+    def test_without_weights_the_batch_shape_is_unchanged(self, tmp_path):
+        uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",))
+        assert len(PreppedSlotDataset([uid], tmp_path, n_groups=2, out_size=8)[0]) == 4
+
+    def test_with_weights_the_weight_row_rides_alongside_the_target(self, tmp_path):
+        uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",))
+        labels = pd.DataFrame([[uid] + [1.0] * len(LABEL_COLUMNS)],
+                              columns=["StudyInstanceUID"] + LABEL_COLUMNS)
+        weights = pd.DataFrame([[uid] + [0.5] * len(LABEL_COLUMNS)],
+                               columns=["StudyInstanceUID"] + LABEL_COLUMNS)
+
+        image, mask, y, w, out_uid = PreppedSlotDataset(
+            [uid], tmp_path, labels_df=labels, weights_df=weights,
+            n_groups=2, out_size=8)[0]
+
+        assert out_uid == uid
+        assert w.shape == y.shape
+        assert torch.allclose(w, torch.full_like(w, 0.5))
+
+    def test_a_study_absent_from_the_weights_gets_full_weight_not_zero(self, tmp_path):
+        """A missing weight means "no agreement information", which is not the
+        same as "this study is worthless" -- zero would silently drop it."""
+        uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",))
+        labels = pd.DataFrame([[uid] + [1.0] * len(LABEL_COLUMNS)],
+                              columns=["StudyInstanceUID"] + LABEL_COLUMNS)
+
+        _, _, y, w, _ = PreppedSlotDataset(
+            [uid], tmp_path, labels_df=labels,
+            weights_df=pd.DataFrame(columns=["StudyInstanceUID"] + LABEL_COLUMNS),
+            n_groups=2, out_size=8)[0]
+
+        assert torch.allclose(w, torch.ones_like(w))

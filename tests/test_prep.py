@@ -5,15 +5,26 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from knee.dicom import StudyDecodeError
+import knee.prep
+from knee.dicom import (
+    SLICE_GROUP,
+    SLOTS,
+    SLOTS_V3,
+    StudyDecodeError,
+    _read_slice_header,
+    sequence_weighting,
+)
 from knee.prep import (
     _pad_to_square,
+    crop_to_mm,
     load_study_npz,
     mirror_to_canonical,
     mirrors_in_plane,
     normalize_series,
+    prep_slots,
     prep_study,
     save_study_npz,
+    study_weightings,
 )
 
 _SAMPLE_ROOT = Path(__file__).resolve().parents[1] / "data" / "sample"
@@ -440,3 +451,288 @@ def test_prep_study_output_survives_a_save_load_round_trip(tmp_path):
 
     assert loaded_meta["StudyInstanceUID"] == study_uid
     assert set(loaded_slices) == set(loaded_meta["series"])
+
+
+# --- Phase 6 prep v2: physical-scale crop --------------------------------------
+
+
+def test_crop_to_mm_gives_the_same_physical_extent_regardless_of_pixel_spacing():
+    # The whole point of the mm crop: two acquisitions of the same knee at
+    # different pixel spacings must come out at the same mm/px, so a 3mm
+    # feature covers the same number of output pixels in both. Under the old
+    # fixed-pixel letterbox they differed by the spacing ratio.
+    fine = np.zeros((400, 400), dtype=np.uint8)   # 0.25 mm/px -> 100 mm FOV
+    coarse = np.zeros((100, 100), dtype=np.uint8)  # 1.0 mm/px -> 100 mm FOV
+    # a 10 mm square block at the centre of each
+    fine[180:220, 180:220] = 255
+    coarse[45:55, 45:55] = 255
+
+    a = crop_to_mm(fine, (0.25, 0.25), crop_mm=100.0, out_size=200)
+    b = crop_to_mm(coarse, (1.0, 1.0), crop_mm=100.0, out_size=200)
+
+    assert a.shape == b.shape == (200, 200)
+    # 10 mm at 100 mm / 200 px = 0.5 mm/px is 20 px in both
+    assert abs(int((a > 127).sum() ** 0.5) - 20) <= 2
+    assert abs(int((b > 127).sum() ** 0.5) - 20) <= 2
+
+
+def test_crop_to_mm_handles_anisotropic_pixel_spacing():
+    # PixelSpacing is [row, column] and the two are not always equal; cropping
+    # the same pixel count on both axes would take a different physical extent
+    # on each.
+    image = np.zeros((200, 100), dtype=np.uint8)
+    image[95:105, 45:55] = 255
+
+    out = crop_to_mm(image, (0.5, 1.0), crop_mm=50.0, out_size=100)
+
+    assert out.shape == (100, 100)
+    # 50 mm is 100 rows and 50 columns of the source: both map onto 100 px out,
+    # so the block stays centred and roughly square in physical terms.
+    rows = np.where(out.max(axis=1) > 127)[0]
+    cols = np.where(out.max(axis=0) > 127)[0]
+    assert abs(rows.mean() - 50) < 3 and abs(cols.mean() - 50) < 3
+
+
+def test_crop_to_mm_zero_pads_a_field_of_view_smaller_than_the_crop():
+    # ~0.4% of the corpus has a FOV under 130 mm. Padding has to happen after
+    # the crop is centred, or the anatomy shifts off centre.
+    image = np.full((50, 50), 200, dtype=np.uint8)  # 1 mm/px -> 50 mm FOV
+
+    out = crop_to_mm(image, (1.0, 1.0), crop_mm=100.0, out_size=100)
+
+    assert out.shape == (100, 100)
+    assert out[0, 0] == 0 and out[-1, -1] == 0          # padded border
+    assert out[50, 50] == 200                            # centre is real signal
+    filled = np.where(out.max(axis=1) > 0)[0]
+    assert abs((filled.min() + filled.max()) / 2 - 49.5) < 2  # still centred
+
+
+def test_crop_to_mm_rejects_missing_pixel_spacing():
+    # A fixed-pixel fallback here would silently reintroduce the defect the mm
+    # crop exists to remove, on only some rows. The caller skips such a series.
+    with pytest.raises(ValueError):
+        crop_to_mm(np.zeros((10, 10), dtype=np.uint8), None, crop_mm=130.0, out_size=336)
+
+
+# --- Phase 6 prep v2: slot-keyed study artifacts --------------------------------
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="no real downloaded study available")
+def test_prep_slots_stores_contiguous_groups_per_filled_slot_and_leaves_the_rest_empty():
+    # the sample study has no sagittal fluid-sensitive and no coronal
+    # structural series, so 4 of 6 slots fill -- exactly the partial coverage
+    # the presence mask exists for
+    series_df = pd.read_csv(_TEST_SERIES_CSV)
+
+    slot_slices, meta = prep_slots(
+        _real_study_uid(), _TEST_SERIES_DIR, series_df, n_groups=2, out_size=64
+    )
+
+    assert set(slot_slices) == {"AX_FLUID", "COR_FLUID", "SAG_STRUCT", "AX_STRUCT"}
+    assert meta["slots"]["SAG_FLUID"] is None and meta["slots"]["COR_STRUCT"] is None
+    for name, slices in slot_slices.items():
+        assert len(slices) == 2 * SLICE_GROUP
+        assert all(s.shape == (64, 64) and s.dtype == np.uint8 for s in slices)
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="no real downloaded study available")
+def test_prep_slots_normalizes_physical_scale_across_series_with_different_spacing():
+    series_df = pd.read_csv(_TEST_SERIES_CSV)
+
+    _, meta = prep_slots(
+        _real_study_uid(), _TEST_SERIES_DIR, series_df, n_groups=1, out_size=64,
+        crop_mm=100.0,
+    )
+
+    # every stored slot describes the same physical extent, whatever its
+    # acquisition spacing was -- that is the defect the letterbox path had
+    assert {sm["crop_mm"] for sm in meta["series"].values()} == {100.0}
+    assert {round(sm["mm_per_px"], 6) for sm in meta["series"].values()} == {round(100.0 / 64, 6)}
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="no real downloaded study available")
+def test_prep_slots_records_the_header_weighting_fields_for_a_later_slot_split():
+    # the CSV's one weighting axis cannot separate T1 from non-suppressed
+    # PD/T2; recording these now means that question can be measured later
+    # without re-prepping 4,407 studies to obtain the tags
+    series_df = pd.read_csv(_TEST_SERIES_CSV)
+
+    _, meta = prep_slots(_real_study_uid(), _TEST_SERIES_DIR, series_df, n_groups=1, out_size=32)
+
+    for sm in meta["series"].values():
+        assert {"RepetitionTime", "EchoTime", "ScanningSequence", "SeriesDescription"} <= set(sm)
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="no real downloaded study available")
+def test_prep_slots_skips_a_series_without_pixel_spacing_and_counts_it(tmp_path, monkeypatch):
+    # a fixed-pixel fallback would reintroduce the unnormalized-scale defect on
+    # exactly the rows nobody can check, so the slot stays empty instead
+    import knee.prep as prep_module
+
+    series_df = pd.read_csv(_TEST_SERIES_CSV)
+    real = prep_module._read_slice_header
+
+    def spacingless(path):
+        header = real(path)
+        header["PixelSpacing"] = None
+        return header
+
+    monkeypatch.setattr(prep_module, "_read_slice_header", spacingless)
+
+    with pytest.raises(StudyDecodeError):
+        prep_slots(_real_study_uid(), _TEST_SERIES_DIR, series_df, n_groups=1, out_size=32)
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="no real downloaded study available")
+def test_prep_slots_output_survives_a_save_load_round_trip(tmp_path):
+    series_df = pd.read_csv(_TEST_SERIES_CSV)
+    study_uid = _real_study_uid()
+
+    slot_slices, meta = prep_slots(
+        study_uid, _TEST_SERIES_DIR, series_df, n_groups=1, out_size=32
+    )
+    path = tmp_path / "study.npz"
+    save_study_npz(path, slot_slices, meta)
+    loaded, loaded_meta = load_study_npz(path, order=[name for name, _, _ in SLOTS])
+
+    # slot-table order, not alphabetical and not the priority ranking v1 used
+    assert list(loaded) == ["COR_FLUID", "AX_FLUID", "SAG_STRUCT", "AX_STRUCT"]
+    assert loaded_meta["slots"] == meta["slots"]
+    for name in loaded:
+        assert len(loaded[name]) == len(slot_slices[name])
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="needs the sample DICOMs")
+class TestStudyWeightings:
+    """One header per series, so the v3 slot table can be built at prep time.
+
+    Prep must derive this itself rather than read results/weighting_census.csv:
+    the census covers the training corpus and the hidden test set has none, so a
+    lookup table would work in every screen and fail at submission.
+    """
+
+    def _study(self):
+        uid = _real_study_uid()
+        study_dir = _TEST_SERIES_DIR / uid
+        return study_dir, [p.name for p in sorted(study_dir.iterdir()) if p.is_dir()]
+
+    def test_every_series_gets_one_of_the_declared_classes(self):
+        study_dir, series = self._study()
+
+        weightings = study_weightings(study_dir, series)
+
+        assert set(weightings) == set(series)
+        assert set(weightings.values()) <= {"T1", "PD", "T2", "GRE", "unknown"}
+
+    def test_it_agrees_with_sequence_weighting_on_the_series_first_slice(self):
+        study_dir, series = self._study()
+        weightings = study_weightings(study_dir, series)
+
+        for series_uid in series:
+            slices = sorted((study_dir / series_uid).glob("*.dcm"))
+            if not slices:
+                continue
+            header = _read_slice_header(slices[0])
+            assert weightings[series_uid] == sequence_weighting(
+                header["RepetitionTime"], header["EchoTime"], header["ScanningSequence"])
+
+    def test_a_series_with_no_slices_is_unknown_not_missing(self, tmp_path):
+        """An absent key and an "unknown" value mean the same thing to
+        select_slots_v3, but only one of them is greppable in a census."""
+        (tmp_path / "empty").mkdir()
+        assert study_weightings(tmp_path, ["empty"]) == {"empty": "unknown"}
+
+    def test_a_series_directory_that_does_not_exist_is_unknown(self, tmp_path):
+        assert study_weightings(tmp_path, ["absent"]) == {"absent": "unknown"}
+
+    def test_an_unreadable_slice_is_unknown_rather_than_raising(self, tmp_path):
+        (tmp_path / "bad").mkdir()
+        (tmp_path / "bad" / "000.dcm").write_bytes(b"not a dicom")
+        assert study_weightings(tmp_path, ["bad"]) == {"bad": "unknown"}
+
+    def test_it_reads_one_slice_per_series_not_the_whole_stack(self, monkeypatch):
+        """TR/TE are acquisition parameters and constant within a series, so
+        reading the stack would cost tens of times more for the same answer --
+        over 24,371 series that is minutes against hours."""
+        study_dir, series = self._study()
+        calls = []
+        real = knee.prep._read_slice_header
+        monkeypatch.setattr(knee.prep, "_read_slice_header",
+                            lambda path: (calls.append(path), real(path))[1])
+
+        study_weightings(study_dir, series)
+
+        assert len(calls) == len([s for s in series if any((study_dir / s).glob("*.dcm"))])
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="needs the sample DICOMs")
+class TestPrepSlotsV3:
+    """prep_slots against the recovered 19-slot table.
+
+    `slot_scheme="v3"` is opt-in and v2 stays the default: v2 is the artifact
+    behind the scored 0.905 submission, and the same discipline kept prep v1
+    alive until Phase 6's Step 3 re-baseline confirmed its replacement.
+    """
+
+    def _args(self):
+        uid = _real_study_uid()
+        return uid, _TEST_SERIES_DIR, pd.read_csv(_TEST_SERIES_CSV)
+
+    def test_v3_keys_the_artifact_by_the_recovered_slot_names(self):
+        uid, root, series_df = self._args()
+
+        slot_slices, meta = prep_slots(uid, root, series_df, n_groups=1,
+                                       out_size=32, slot_scheme="v3")
+
+        names = {name for name, _, _, _ in SLOTS_V3}
+        assert set(meta["slots"]) == names
+        assert set(slot_slices) <= names
+        assert meta["slot_scheme"] == "v3"
+
+    def test_v2_remains_the_default_and_is_unchanged(self):
+        uid, root, series_df = self._args()
+
+        _, meta = prep_slots(uid, root, series_df, n_groups=1, out_size=32)
+
+        assert set(meta["slots"]) == {name for name, _, _ in SLOTS}
+        assert meta["slot_scheme"] == "v2"
+
+    def test_v3_records_the_recovered_weighting_next_to_each_stored_series(self):
+        """Without this the artifact cannot be audited after the fact -- which
+        is exactly how Phase 6 shipped a slot table nobody could check."""
+        uid, root, series_df = self._args()
+
+        slot_slices, meta = prep_slots(uid, root, series_df, n_groups=1,
+                                       out_size=32, slot_scheme="v3")
+
+        assert slot_slices, "sample study filled no v3 slot"
+        for entry in meta["series"].values():
+            assert entry["weighting"] in {"T1", "PD", "T2", "GRE", "unknown"}
+
+    def test_v2_records_no_weighting_at_all_rather_than_unknown(self):
+        """"unknown" means the header was read and could not answer. v2 never
+        asks, and writing "unknown" there would make the two indistinguishable
+        in any later audit of the artifacts."""
+        uid, root, series_df = self._args()
+
+        _, meta = prep_slots(uid, root, series_df, n_groups=1, out_size=32)
+
+        assert all(e["weighting"] is None for e in meta["series"].values())
+
+    def test_v3_stores_the_same_pixels_as_v2_for_a_series_both_schemes_pick(self):
+        # the slot table decides *where* a series is filed, never how it is
+        # cropped or normalized -- a difference there would confound the
+        # 19-vs-6 screen with a silent pixel change
+        uid, root, series_df = self._args()
+
+        v2_slices, v2_meta = prep_slots(uid, root, series_df, n_groups=1, out_size=32)
+        v3_slices, v3_meta = prep_slots(uid, root, series_df, n_groups=1,
+                                        out_size=32, slot_scheme="v3")
+
+        v2_by_series = {v2_meta["slots"][k]: v for k, v in v2_slices.items()}
+        v3_by_series = {v3_meta["slots"][k]: v for k, v in v3_slices.items()}
+        shared = set(v2_by_series) & set(v3_by_series)
+        assert shared, "no series picked by both schemes"
+        for series_uid in shared:
+            for a, b in zip(v2_by_series[series_uid], v3_by_series[series_uid]):
+                assert np.array_equal(a, b)

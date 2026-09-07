@@ -20,7 +20,86 @@ That is rank 2187/2936: the field's median is 0.899 and 10th place is 0.947, so 
 thesis is confirmed while the model itself — 1 epoch, one series, `efficientnet_b0` — is barely
 trained; **Phase 5 complete and promoted** — pooled OOF **0.8523** against run 1's 0.7779, paired
 delta **+0.0744 (95% CI [+0.0669, +0.0820])**, gold transfer **0.8189** against 0.7252, all twelve
-labels improved, and submitted from `notebooks/phase5-submit/`.**
+labels improved, and submitted from `notebooks/phase5-submit/` — scored **0.835**, up from 0.763;
+**Phase 6 complete and scored** — prep v2 (130mm physical-scale crop, six plane/weighting slots with
+a presence mask, 3-slice groups), report-hash folds v3, a public label target, and a per-diagnosis
+slot-attention head, confirmed on five folds (pooled OOF 0.8485, gold transfer **0.8794** against
+Phase 5's 0.8189) and submitted from `notebooks/phase6-submit/` — scored **0.905**, up from 0.835,
+inside its pre-registered band; **Phase 7 in progress** — the recovered slot table (prep v3) is
+built and the corpus re-prepped, c3 is confirmed on five folds, and the two-config ensemble measures
+**+0.0156 [+0.0136, +0.0175]** pooled OOF over the submitted model — see below.**
+
+**Where we actually stand, and what Phase 7 aims at.** As of 2026-09-07 the field is 3,275 teams:
+1st 0.954, 10th **0.950**, median **0.902**, and we are **0.905, rank 1602** — three thousandths
+above the median. The shape that matters is a shelf: **~940 teams are packed into 0.930–0.940**, so
+in that band **+0.01 AUC is worth ~940 places**. Phase 7 therefore targets **0.930–0.940**, not the
+podium. That shelf is teams running `pilkwang/rsna-knee-baseline-v1`'s *fitted weights*, not 940
+independent reimplementations — which matters, because Phase 6 implemented most of that recipe and
+landed at 0.905.
+
+**Phase 6 existed because of an earlier leaderboard pull, and the framing was uncomfortable.** As of
+2026-09-06 the field was 3,221 teams: 1st 0.954, 10th **0.950**, median **0.899**, and roughly a
+thousand teams at >=0.93 — the score the most-forked public notebook produces. At 0.835 we were
+rank 2163, i.e. **below what forking a public inference notebook costs nothing to get**. Phase 5's
++0.072 was real, but it was 60% of the distance to the *median*, not to the top ten. The Efficiency
+Track does not rescue this: its formula prices **0.01 AUC at 12 minutes** of runtime, so cutting a
+68-minute run to 10 buys the equivalent of 0.048 AUC against a gap of 0.115, and matching a 0.95
+rival that runs in 30 minutes would need 0.925 *at zero runtime*. (It is not hopeless there — a 0.95
+model taking four hours scores worse than our submitted 0.835 at 68 minutes, because the track really
+does reward accuracy per second — but accuracy is the lever in both tracks.)
+
+**Phase 7 so far.** Three findings, each measured rather than assumed:
+
+| finding | evidence |
+|---|---|
+| **An acquisition axis was invisible to the model.** `train_series.csv`'s one column encodes *fat suppression*; TR/TE encode *weighting*, and they are orthogonal. `SAG_STRUCT` alone carried 1,645 T1, 1,702 PD, 1,224 T2 and 388 GRE into a single attention position | corpus header census, 24,371 series in 2.5 min |
+| **DINOv2 was overfitting, not underfitting.** Phase 6 read "training loss still falling at epoch 8" as unfinished learning. At 16 epochs the loss falls *below* efficientnet's while both validation tiers drop | val −0.0075 [−0.0156, −0.0006], gold −0.0391 [−0.0701, −0.0045], both CIs excluding zero |
+| **Config diversity is fully additive to fold averaging.** c2+c3 over five folds each beats either member by the same margin the fold-0 screen measured over single-fold members | OOF +0.0156 [+0.0136, +0.0175]; gold 0.8919 vs 0.8794 |
+
+**Prep v3** re-prepped all 4,407 studies into a nineteen-slot table (plane × fat-suppression ×
+{T1, PD, T2, UNK}) with 0 failures, mean 5.04 filled slots per study against a census prediction of
+5.04, and **every slot holding exactly one weighting class**. The `_UNK` tier is load-bearing: 238
+studies (5.4%) have no recoverable TR/TE on any series and would otherwise get zero slots. Whether
+nineteen sparse positions beat six dense ones is the next screen, not an assumption — the median
+study fills 5 of 19.
+
+Phase 6 takes the half of the 2026-09-05 recon that Phase 5 skipped — Phase 5 banked the cheap levers
+(schedule, AMP, augmentation, a second series) and left the structural ones. Landed so far:
+
+| step | what | result |
+|---|---|---|
+| prep v2 | 130mm physical-scale crop at 336px, six plane/weighting slots + presence mask, contiguous 3-slice groups | corpus prepped: **21,334 series carrying 1,028 distinct `PixelSpacing` values all came out at one mm/px** |
+| folds v3 | re-frozen on normalized report text | report-group leakage **4.31% -> 0** |
+| label A/B | our Qwen3-4B against four public label sets | **ours placed 3rd of 5**; the winner is now the training target |
+| loader/model | slot axis with a presence mask, masked pooling, per-diagnosis attention | replaces a flat volume that could not express a missing plane at all |
+| ensembling | probability mean over configs and folds | +0.0159 [+0.0114, +0.0209] over the best single model |
+
+Fold-0 screens, all on the promoted `steven_v4` target, scored on 863 held-out studies and on the 58
+rubric-graded gold studies that no model trains on:
+
+| arm | val | gold | min |
+|---|---|---|---|
+| c0 — 2 slots, efficientnet_b0 | 0.8464 | 0.8657 | 18.5 |
+| c1 — 6 slots + presence mask | 0.8580 | 0.8579 | 47.1 |
+| **c2 — + per-diagnosis attention** | **0.8607** | 0.8759 | 51.0 |
+| c3 — DINOv2-small, 2 slots | 0.8512 | 0.8686 | 23.3 |
+| c5 — DINOv2, full stack | 0.8549 | 0.8724 | 60.1 |
+| **c1+c2+c3+c5, probability mean** | **0.8767** | **0.8897** | — |
+
+Three findings worth carrying out of that table. **The label source mattered more than any
+architecture** — swapping our Qwen3-4B labels for a public set moved gold transfer +0.0339
+[+0.0067, +0.0625], and on the *circular* metric (each model scored against its own labels) the
+swap looked like a regression, which is why the 58 gold studies are used as the arbiter whenever the
+target itself is the variable. **No single backbone or head wins; the ensemble does** — c3 is null as
+a standalone model and the best ensemble partner in the set, because its per-label strengths (MCL,
+Contusion, Fracture) are where c2 is weakest. And **the attention head learned the anatomy unprompted**:
+averaged over gold studies it sends ACL to the sagittal slot (0.54), MCL to coronal (0.55), Baker's to
+axial (0.56), with nothing in the loss describing knee anatomy.
+
+One public label set (`yunusgmsoy/...-4-source-merged`) is excluded from both scoring and training
+because it scores a perfect 1.0000 on all twelve gold labels — its 58 gold rows are copied from
+`train.csv`. A candidate that scores near-perfectly against a small gold set is contaminated until
+proven otherwise.
 
 Phase 5 came out of reading the top public notebook for intel (not code): it runs DINOv2 at 10
 epochs with physical-scale sampling and rank-mean ensembling. Two of its claims were tested against
@@ -164,13 +243,22 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
                       laterality resolution + census, decode/normalize; also owns
                       StudyDecodeError and the slice-header read both dataset.py and
                       prep.py need (kept here to avoid a circular import)
-  prep.py            [done] normalize_series, pad-to-square, mirror_to_canonical +
-                      mirrors_in_plane (only Axial/Coronal flip), JPEG-in-.npz storage with
-                      selective decode, and the pure prep_study orchestrator
-  dataset.py         [done] KneeStudyDataset over raw DICOMs (Phase 1 shape) and
-                      PreppedStudyDataset over the Phase 2 .npz artifacts, same contract
-  model.py           [done, Phase 1 shape] single backbone + mean-pool over slices;
-                      slice/series attention is a later Phase 5 upgrade
+  prep.py            [done] normalize_series, mirror_to_canonical + mirrors_in_plane (only
+                      Axial/Coronal flip), JPEG-in-.npz storage with selective decode, the
+                      Phase 2 prep_study orchestrator (pad-to-square letterbox), and the
+                      Phase 6 prep_slots orchestrator: crop_to_mm gives every study the same
+                      physical scale, which the letterbox never did -- studies differ in
+                      mm/px by a factor of several and no downstream capacity recovers that
+  dataset.py         [done] KneeStudyDataset over raw DICOMs (Phase 1 shape),
+                      PreppedStudyDataset over the Phase 2 .npz artifacts, and
+                      PreppedSlotDataset over the Phase 6 slot artifacts -- the last
+                      returns (image [slot, group, 3, H, W], presence mask, labels, uid)
+                      rather than one flat slice axis, so "this study has no coronal
+                      acquisition" is expressible instead of being padded over
+  model.py           [done] single backbone, pooled over images; accepts either the flat
+                      volume or the slot-structured one and pools only over present slots
+                      (an unmasked mean averages anatomy with the black squares that
+                      absent slots arrive as). Per-diagnosis attention is the next step
   train.py           [done] masked BCE, fold assignment, one epoch, evaluate, experiment logging --
                        used for the real Phase 1 5-fold training run (notebooks/phase1-train/);
                        also Timer (accumulating wall-clock stopwatch feeding train_minutes),
@@ -210,6 +298,33 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         study (same path the training artifacts took), 5-fold mean, 0.5 fallback
   phase5-train/        experiment B: max_series 1 -> 2 and nothing else, with the paired
                         bootstrap delta against run 1's OOF arrays
+  phase5-laterality/   corpus-scale test of the image-centre laterality route, header-only:
+                        4,407 studies in 2.1 min, coverage 51.1% -> 98.5%
+  phase5-screen/       screen A -- the training schedule (epochs, OneCycle, AMP) on one fold
+  phase5-screen-b/     screen B -- augmentation, a second series, and the laterality override
+  phase5-confirm/      the 5-fold confirm behind the 0.835 submission (pooled OOF 0.8523)
+  phase5-submit/       that submission's inference kernel: 5-fold mean, geometry laterality
+  phase6-prep-shard0..3/  prep v2 over the corpus: physical-scale crop, slot table, slice
+                        groups. Gates on slot fill, constant mm/px, and an 8x6 visual grid
+  phase6-screen/       Step 3's re-baseline on the new artifact, then the Phase 6 screen cells.
+                        Regenerates folds v3 in-kernel and pins them by SHA rather than
+                        mounting a CSV, and asserts the corpus prep census from the shard
+                        manifests -- 9.5GB of artifacts need not leave Kaggle to be checked
+  phase6-confirm/      5-fold confirm of the six-slot attention config: pooled OOF 0.8485,
+                        gold transfer 0.8794, and the finding that fold 0 is an easy fold
+  phase6-submit/       the scored 0.905 submission: prep v2 on test DICOMs, the presence mask
+                        passed to the model, probability mean over the five folds
+  phase7-census/       CPU header walk over all 24,371 series recovering TR/TE weighting --
+                        the run that showed every _STRUCT slot mixes T1, PD, T2 and GRE
+  phase7-prep-shard0..3/  prep v3: the nineteen-slot recovered table (plane x fat-suppression
+                        x weighting) with an explicit UNK tier for the 238 studies whose
+                        headers carry no recoverable TR/TE
+  phase7-screen/       the s1 schedule gate -- DINOv2 at 8 vs 16 epochs, both arms in one
+                        session so the pairing does not rest on an unrecoverable batch size
+  phase7-confirm-c3/   c3's 5-fold confirm, the second ensemble member: OOF 0.8491, gold
+                        0.8805, at 43% of c2's GPU cost
+  phase7-submit/       the two-config ensemble kernel: one prep pass, two loader shapes and
+                        two architectures, probability mean over ten models
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
@@ -239,8 +354,19 @@ record: `bakeoff.csv` (one row per candidate, full precision), `bakeoff_scores/`
 `pseudo_labels_qwen3_4b.csv` + `verification_manifest.json` (all 4,407 studies' soft labels — the
 Phase 4 training target).
 
-Two frozen reference files, written once and then read-only — both must stay stable, since a silent
-change to either invalidates every comparison made against them:
+Three frozen reference files, written once and then read-only — a silent change to any of them
+invalidates every comparison made against it:
+
+- `folds_primary_v3.csv` — Phase 6's fold set:
+  `make_folds(uids, n_folds=5, seed=0, groups=report_group_key(report))`, grouped so studies sharing
+  a report never straddle a fold. `primary_v2` leaked 47 report groups over 190 studies (4.31%) —
+  that much of its OOF was scored against text the model had already trained on. Re-freezing was
+  deferred while it would have broken Phase 5's paired comparisons; prep v2 breaks them anyway, which
+  made this the free moment. The key normalizes case and whitespace before hashing: byte-identical
+  finds 46 duplicate groups, `.strip()` 49, and this key 54 — two reports differing only in spacing
+  are the same report and leak identically. Screen kernels regenerate it in-kernel and assert
+  SHA256 `f1d6ba7c341f8d2e82241cb4ddd5ca5131b0c6d2033eb6d2e43bcb597cf12868`.
+- `label_source_gold.csv` — every candidate report-label source scored against the 58 gold studies.
 
 - `folds_primary_v2.csv` — `make_folds(all 4,407 train.csv UIDs, n_folds=5, seed=0)`. The earlier
   `primary_v1` fold set covered only the 2,151 lexically-labeled studies; once training runs on the
