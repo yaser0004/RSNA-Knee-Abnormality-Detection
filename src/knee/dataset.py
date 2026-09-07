@@ -6,6 +6,8 @@ import torch
 from torch.utils.data import Dataset
 
 from knee.dicom import (
+    SLICE_GROUP,
+    SLOTS,
     StudyDecodeError,
     _read_slice_header,
     decode_and_normalize,
@@ -65,6 +67,19 @@ def augment_volume(volume: torch.Tensor) -> torch.Tensor:
     out = TF.affine(volume.unsqueeze(1), angle=angle, translate=shift, scale=scale,
                     shear=[0.0, 0.0]).squeeze(1)
     return (out * gain).clamp_(0.0, 1.0)
+
+
+def _lookup_weights(weights_df: pd.DataFrame, study_uid: str) -> torch.Tensor:
+    """Per-label sample weights for one study, defaulting to 1.0.
+
+    A study absent from the frame gets full weight, not zero: a missing row means
+    the sources were never compared for it, which is not a reason to drop it from
+    the loss. Zero would do exactly that, silently."""
+    row = weights_df[weights_df["StudyInstanceUID"] == study_uid]
+    if row.empty:
+        return torch.ones(len(LABEL_COLUMNS))
+    values = row[LABEL_COLUMNS].to_numpy(dtype="float32")[0]
+    return torch.nan_to_num(torch.tensor(values), nan=1.0)
 
 
 def _lookup_labels(labels_df: pd.DataFrame | None, study_uid: str) -> torch.Tensor | None:
@@ -241,6 +256,143 @@ class PreppedStudyDataset(Dataset):
 
     def _lookup_labels(self, study_uid: str) -> torch.Tensor | None:
         return _lookup_labels(self.labels_df, study_uid)
+
+
+_SLOT_NAMES = [name for name, _, _ in SLOTS]
+_SLOT_PLANES = {name: plane for name, plane, _ in SLOTS}
+
+
+class PreppedSlotDataset(Dataset):
+    """Reads the Phase 6 prep v2 artifacts (prep_slots + save_study_npz) and
+    returns (image, mask, labels, study_uid).
+
+    `image` is [n_slots, n_groups, 3, H, W] and `mask` is [n_slots] of bool.
+    This is the replacement PreppedStudyDataset's docstring asks for: v1
+    flattened every series into one long slice axis and padded by repeating the
+    last series, which cannot express "this study has no coronal acquisition" at
+    all -- a repeated series and a real second series look identical to the
+    model. An absent slot here is zeros with its mask entry false, so a head can
+    decline to attend to it.
+
+    The channel axis holds the three *adjacent* slices of a stored group rather
+    than one slice replicated three times, which is why prep stores groups.
+
+    Artifacts are stored at 336px so resolution stays a screenable axis without
+    a second corpus prep; `out_size` downsamples on the way out.
+
+    Mirroring stays a load-time decision, as in v1, and still respects
+    mirrors_in_plane: a slot's plane comes from the slot table, so sagittal
+    slots are never flipped (their horizontal axis is anterior-posterior, and
+    flipping one mirrors the knee front-to-back)."""
+
+    def __init__(
+        self,
+        study_uids: list[str],
+        npz_root: str | Path,
+        labels_df: pd.DataFrame | None = None,
+        n_groups: int = 5,
+        out_size: int = 224,
+        slots: list[str] | None = None,
+        canonical: str = "R",
+        sides: dict[str, str] | None = None,
+        augment: bool = False,
+        weights_df: pd.DataFrame | None = None,
+    ):
+        self.study_uids = list(study_uids)
+        self.npz_root = Path(npz_root)
+        self.labels_df = labels_df
+        # per-label sample weights (knee.reports.confidence_from_agreement).
+        # Opt-in: with none set the batch keeps its 4-tuple shape, so a config
+        # screened before this existed still pairs against one screened after.
+        self.weights_df = weights_df
+        self.n_groups = n_groups
+        self.out_size = out_size
+        # a subset keeps the slot axis meaningful: Step 3's re-baseline reads 2
+        # of the 6 to sit as close to the Phase 5 configuration as v2 allows
+        self.slots = list(slots) if slots is not None else list(_SLOT_NAMES)
+        self.canonical = canonical
+        self.sides = sides or {}
+        self.augment = augment
+
+    def __len__(self) -> int:
+        return len(self.study_uids)
+
+    def __getitem__(self, idx: int):
+        study_uid = self.study_uids[idx]
+        image, mask = self._load_image(study_uid)
+        labels = _lookup_labels(self.labels_df, study_uid)
+        if self.weights_df is None:
+            return image, mask, labels, study_uid
+        return image, mask, labels, _lookup_weights(self.weights_df, study_uid), study_uid
+
+    def _select_groups(self, slices: list[np.ndarray]) -> list[np.ndarray]:
+        """Take n_groups groups from the ones stored, spread across the artifact's
+        band rather than from its start.
+
+        prep stores groups spanning the 0.20-0.80 band of the slice stack. A
+        config reading fewer groups than were stored must sample across that
+        span: taking a prefix would confound "fewer groups" with "only the
+        bottom of the joint", and a screen varying n_groups would then measure
+        anatomical coverage rather than the axis it names.
+
+        ponytail: the JPEG decode still covers every stored slice, because
+        load_study_npz can only truncate a prefix, not take a spread. The waste
+        is zero at n_groups=5 (all of them) and the decode is ~85% of load time,
+        so this is only worth revisiting if a config actually reads fewer."""
+        stored = len(slices) // SLICE_GROUP
+        if stored >= self.n_groups:
+            picks = np.linspace(0, stored - 1, num=self.n_groups).round().astype(int)
+            return [slices[g * SLICE_GROUP + j] for g in picks for j in range(SLICE_GROUP)]
+
+        wanted = self.n_groups * SLICE_GROUP
+        padded = list(slices)
+        while len(padded) < wanted:
+            padded.append(padded[-1])
+        return padded[:wanted]
+
+    def _load_image(self, study_uid: str) -> tuple[torch.Tensor, torch.Tensor]:
+        path = self.npz_root / f"{study_uid}.npz"
+        if not path.exists():
+            raise StudyDecodeError(f"no prepped artifact at {path}")
+
+        stored, meta = load_study_npz(path, order=self.slots)
+        if not stored:
+            raise StudyDecodeError(f"prepped artifact for {study_uid} holds no slot")
+
+        side = self.sides.get(study_uid, meta.get("side"))
+        size = self.out_size
+        # an absent slot is zeros at whatever the artifact's stored resolution
+        # is, not at out_size -- they are stacked together and resized once
+        stored_shape = next(iter(stored.values()))[0].shape
+        blocks = []
+        present = []
+        for name in self.slots:
+            slices = stored.get(name)
+            if not slices:
+                blocks.append(np.zeros((self.n_groups, SLICE_GROUP, *stored_shape), np.float32))
+                present.append(False)
+                continue
+
+            flip_side = side if mirrors_in_plane(_SLOT_PLANES[name]) else None
+            slices = [mirror_to_canonical(s, flip_side, canonical=self.canonical)
+                      for s in slices]
+            slices = self._select_groups(slices)
+            arr = np.stack(slices).astype(np.float32) / 255.0
+            blocks.append(arr.reshape(self.n_groups, SLICE_GROUP, *arr.shape[-2:]))
+            present.append(True)
+
+        volume = torch.from_numpy(np.stack(blocks))
+        if volume.shape[-1] != size or volume.shape[-2] != size:
+            flat = volume.reshape(-1, *volume.shape[-2:]).unsqueeze(1)
+            volume = TF.resize(flat, [size, size], antialias=True).reshape(
+                len(self.slots), self.n_groups, SLICE_GROUP, size, size)
+        if self.augment:
+            # one transform per study, applied to every slot and channel: a
+            # study is a single sample, and jittering slots independently would
+            # desynchronise the anatomy between planes
+            shape = volume.shape
+            volume = augment_volume(volume.reshape(-1, size, size)).reshape(shape)
+        return volume, torch.tensor(present, dtype=torch.bool)
 
 
 class CachedDataset(Dataset):

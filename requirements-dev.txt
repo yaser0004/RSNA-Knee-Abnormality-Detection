@@ -2,6 +2,9 @@ pytest==9.0.3
 numpy==2.4.6
 pandas==3.0.2
 scikit-learn==1.8.0
+# already installed as a scikit-learn dependency; listed because infer.rank_mean
+# imports it directly rather than relying on that staying true
+scipy==1.17.1
 pydicom==3.0.2
 pylibjpeg==2.1.0
 pylibjpeg-libjpeg==2.4.0

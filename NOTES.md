@@ -1142,8 +1142,7 @@ experiment budget top-down on the old order.
 
 ### Phase 5 Step 1 — public-notebook recon, and two of its claims tested against our data (2026-09-05)
 
-Pulled the five most-voted public notebooks into `ai/research/` (intel only; we write our own
-code). The 0.934 cluster is **`pilkwang/rsna-knee-baseline-v1`, 512 votes** — nearly 3x the next
+Read the five most-voted public notebooks (intel only; we write our own code). The 0.934 cluster is **`pilkwang/rsna-knee-baseline-v1`, 512 votes** — nearly 3x the next
 notebook and comfortably the thing ~700 teams forked. It is an *inference* notebook that loads
 pre-fitted weights, but it carries the full recipe in its source.
 
@@ -1509,3 +1508,1358 @@ The generalisation error is the lesson worth keeping: one failing invocation was
 CLI cannot do this" rather than "this *form* of the CLI call cannot do this", and that stood
 unchallenged for a month, adding a manual step to every submission. `--help` on the subcommand
 would have shown `-k/-v` at any point.
+
+### Leaderboard census: the field moved further than we did (2026-09-06)
+
+Phase 5 scored **LB 0.835** (submission 56047536), up from Phase 4's 0.763. Then the leaderboard was
+pulled in full for the first time since the plan was written — 3,221 teams, snapshot kept outside the
+repo. It reframes the whole project.
+
+| | plan doc (2026-08-08) | today |
+|---|---|---|
+| 1st | 0.934 | **0.954** |
+| 10th | ~0.872 | **0.950** |
+| 100th | — | 0.940 |
+| **median team** | — | **0.899** |
+| us | 0.558 (rank ~2440 equivalent) | **0.835, rank 2163 / 3221** |
+
+Teams at or above a score: 0.95 -> 11, 0.94 -> 119, **0.93 -> 1,000**, 0.92 -> 1,299, 0.90 -> 1,606,
+0.87 -> 2,008, 0.835 -> 2,169.
+
+**The 0.93 shelf is the finding.** A thousand teams sit at >=0.93, and `pilkwang/rsna-knee-baseline-v1`
+(512 votes) is an *inference* notebook shipping pre-fitted weights. That shape — a thousand teams
+clustered on one number, at the score its most-forked public notebook produces — is a fork cluster,
+not a thousand independent solutions. **Our own pipeline scores below what forking costs nothing to
+get.** Two submissions of real work (0.763, 0.835) moved us from roughly rank 2440 to 2163; the
+distance to 10th is 0.115 and the distance to the median team is 0.064.
+
+**Three consequences, all load-bearing.**
+
+1. **Correction to this entry, made the same week (see 2026-09-07 below): the field's standing was
+   already known.** README.md has recorded "rank 2187/2936: the field's median is 0.899 and 10th place
+   is 0.947" since commit 433328e on **2026-09-03** — before Phase 5's screens were run. So the failure
+   was not a missing measurement. **The plan document was never updated from it**, and the plan document
+   is what drives phase prioritization, so Phase 5 proceeded down its pre-registered payoff order as
+   though 10th place were still 0.872. Phase 5's +0.072 was read as most of the distance to the top ten;
+   against the number already in our own README it was 60% of the distance to the *median*. The lesson is
+   not "re-pull the leaderboard" — that had been done. It is that a number recorded in a status document
+   and never propagated into the document that governs decisions changes nothing.
+2. **The Efficiency Track is not an escape hatch.** `AUC/(0.5 - maxAUC) + s/32400` prices 0.01 AUC at
+   720 s of runtime. Against a field at 0.95, a fast 0.87 does not place — the AUC term swamps any
+   runtime saving a free-tier notebook can produce. Accuracy gates both prizes, so there is no version
+   of this project where the accuracy work gets skipped.
+3. **The gold-transfer -> LB offset is shrinking and the extrapolation rule is retired.** Run 1: gold
+   0.7252 -> LB 0.763, offset **+0.038**. Phase 5: gold 0.8189 -> LB 0.835, offset **+0.016**. The
+   pre-registered reading extrapolated the first offset onto the second gold number and predicted
+   ~0.857; the actual was 0.835. Two points do not fit a curve, but they do rule out a constant offset,
+   which is what the rule assumed. From here, pre-register a *band* before each submission, never a
+   point estimate off an offset.
+
+**What it does not change:** Phase 5's internal findings all held (schedule +0.061, augmentation, the
+coronal-plus-augmentation interaction, laterality null in isolation). The recipe improvements were
+real. They were aimed at a target that had moved.
+
+**What it does change:** the 2026-09-05 recon listed physical-scale sampling, multi-slot input, a
+per-diagnosis attention head and a domain-appropriate backbone as "most of the distance to 0.93", and
+Phase 5 took only the cheap half of that list — schedule, AMP, augmentation, a second series. Phase 6
+takes the expensive half, plus the deferred report-hash fold leak and the label-source A/B that has
+been item #1 in the payoff order since Phase 3 and has never been run.
+
+### Step 4 gold arm: the field's report labels beat ours, and one public set is contaminated (2026-09-06)
+
+The label-source A/B has been item #1 in the plan's payoff order since Phase 3 and had never been
+run. It is CPU-only and took an afternoon. Four public label sets pulled (all CC0), scored against
+the 58 gold studies alongside our Qwen3-4B pass. No fitting happens — each source is already a
+per-study score — so plain AUC on the 58 is unbiased and LOO would measure the same thing slower.
+Full per-label table in `results/label_source_gold.csv`.
+
+| source | gold macro | paired delta vs ours, 95% CI |
+|---|---|---|
+| **rank-blend of all 5** | **0.8976** | **+0.0360 [+0.0105, +0.0619]** |
+| stevenleehans `llm_labels_v4_blend` | 0.8927 | +0.0311 [+0.0040, +0.0582] |
+| stevenleehans `llm_labels_v2` | 0.8873 | +0.0257 [-0.0010, +0.0523] |
+| **ours (Qwen3-4B)** | **0.8616** | — |
+| lixin73 `gpt56sol` | 0.8488 | -0.0128 [-0.0440, +0.0227] |
+| pilkwang `report_labels_v2` | 0.8142 | -0.0474 [-0.0940, -0.0009] |
+
+**Our labels are third of five, and the gap to the best single public set clears its CI even at
+n=58.** Per label, stevenleehans v4 beats ours on nine of twelve, ties Medial OA, and loses only
+Baker's (-0.01) and Fracture (-0.03); the biggest losses are MCL 0.89 -> 0.97, PF OA 0.83 -> 0.90 and
+Contusion 0.81 -> 0.86. Blending all five by **rank** (the sources are on incomparable scales — hard
+0/1 versus confidence-weighted) beats every single source and is the widest CI-excluding-zero margin
+on the table. Both go into Step 5's c6 cell for the OOF arm; n=58 ranks candidates, it does not
+settle per-label questions.
+
+Worth noting what this costs to know: two months of Phase 3 work — a vLLM dead end, two bake-off
+runs, a two-shard corpus labeling job — produced a label set the field beats with a public CSV. The
+Phase 3 machinery was not wasted (it is what makes the comparison measurable, and ours still beats
+two of the four public sets), but "report quality is the edge" was held as a thesis for two months
+without once checking what everyone else's reports scored. **The comparison was one afternoon of CPU
+at any point after 2026-08-09.**
+
+**`yunusgmsoy/rsna-knee-llm-labels-4-source-merged` is excluded: it scores 1.0000 macro on all
+twelve labels.** Its 58 gold rows match `train.csv` exactly — every label, every study. The other
+four agree with gold on 78-82% of cells, which is a normal LLM-vs-rubric rate. Substituting gold on
+those 58 rows is legitimate for *training* (the labels are public), but it makes the set unusable as
+an evaluation candidate and would silently poison any gold comparison it entered. Caught only
+because a perfect score is implausible enough to look at twice. **Rule from this: any candidate
+scoring near-perfect on the gold set is contaminated until proven otherwise — check row-exact
+agreement with `train.csv` before believing a number.**
+
+### Phase 6 Step 1 — prep v2 built and dry-run; the slot census came free (2026-09-06)
+
+`crop_to_mm`, `select_slots`, `select_slice_groups`, `prep_slots` implemented TDD-first;
+`_read_slice_header` gained four weighting tags; `load_study_npz` gained an explicit key order.
+**160 tests pass (142 before, +18).** Four `phase6-prep-shard{0..3}` notebooks generated and
+dry-run end to end against the local 20-study sample — every gate cell executes, and the physical
+scale assertion passes at exactly 130/336 = 0.3869 mm/px.
+
+**The slot design changed after one crosstab.** The plan said to recover the weighting axis from
+TR/TE/`ScanningSequence`. `Fluid_Sensitive` and `Fat_Suppression` are **identical on all 24,371
+rows** of `train_series.csv` — one column under two names, exactly as pilkwang reports. So the six
+slots are 3 planes x fluid 0/1, straight from the delivered CSV: no header parsing, no hidden-test
+risk, and it is pilkwang's own `SLOTS_PUBLIC` switch. The T1-vs-non-suppressed-PD/T2 split is a later
+screen cell, and the header tags are recorded into per-series meta now so it can be measured without
+re-prepping 4,407 studies to obtain them.
+
+**Slot fill, computed from the CSV alone before prepping anything:**
+
+| slot | studies | fill |
+|---|---|---|
+| AX_FLUID | 4,407 | 100.0% |
+| SAG_STRUCT | 4,266 | 96.8% |
+| COR_FLUID | 4,248 | 96.4% |
+| SAG_FLUID | 4,150 | 94.2% |
+| COR_STRUCT | 3,406 | 77.3% |
+| **AX_STRUCT** | **857** | **19.4%** |
+
+Mean **4.84 of 6**; no study has zero slots; 566 studies fill all six. **AX_STRUCT is the one to
+remember**: it is masked off for four studies in five, so if the slot or attention screens read null,
+check whether that slot is carrying the null before concluding the head cannot use the input. It is
+kept rather than dropped because an empty slot stores nothing and the presence mask is exactly the
+mechanism for this — but it is one attention position that is absent 80% of the time.
+
+**Sizing, measured on a real study before launching:** 15 slices/slot at 336px is 1.86 MB for a
+4-slot study, i.e. ~465 KB per filled slot. At 4.84 slots/study over 4,407 studies that is **9.5 GB
+total, 2.4 GB/shard** — inside the output cap with room, so `N_GROUPS=5` at 336 stands. Prep runs
+~1.6 s/study locally, so a 1,102-study shard is well inside a 12 h CPU session. If it ever has to
+come down the knob is `N_GROUPS`; `OUT_SIZE` is the axis under test and 224px misses a 1 mm tear at
+this crop.
+
+Two edge routes decided rather than defaulted, per the gate: a series with **no `PixelSpacing`** is
+skipped and its slot left empty (a fixed-pixel fallback would silently reintroduce the exact defect
+this rewrite removes, on only the rows nobody can check), and a **field of view under 130 mm** is
+zero-padded after centring, not upscaled. Both counted in the shard census. The local sample shows
+0 of 20 under the crop, min FOV 150 mm.
+
+Prep v1 stays alongside v2 until Step 3's re-baseline confirms the artifact; the two share
+`_series_headers`/`_decode_selected` so their failure census cannot drift. Deleting v1 — the
+letterbox path, `_pad_to_square`, `_priority_rank`, `load_study_npz`'s `max_series` ordering, and
+their tests — is part of Step 3, not a someday item.
+
+**Crop centring checked before launching, because it is the one defect that would make all 9.5 GB
+wrong silently.** `crop_to_mm` centres on the array, and a 130 mm crop of a 320 mm acquisition takes
+the middle of the *image*, which is only the middle of the *knee* if the knee is centred. Note the
+distinction that nearly sent this the wrong way: `image_centre_x`'s median |c_x| of 83 mm is the
+image centre in **patient** coordinates — it says a knee is off the body midline, which is expected,
+and says nothing about where the joint sits inside the array. The testable form is the signal
+centroid against the array centre. On 25 real series (both sample sets, middle slice, >60th
+percentile intensity as the anatomy mask): median offset **10.6 mm**, max **26.5 mm**, **0 of 25
+past 30 mm** (a quarter of the crop), and the one 320 mm-wide-FOV series is 10.6 mm off. So a centred
+crop lands on the joint. n=25 and a centroid is a proxy, so the shard-0 visual grid is still the real
+gate — it now prefers studies filling all six slots, since AX_STRUCT at 19.4% would otherwise never
+appear in an arbitrary first-8 grid and would ship unlooked-at.
+
+### Phase 6 Step 2 — folds re-frozen on report text, leak eliminated (2026-09-06)
+
+`make_folds` gained a `groups` argument: groups are assigned largest-first to whichever fold is
+currently smallest, rather than round-robin, because one real report group has 37 members and
+round-robin over groups would drop that whole block into one fold. `groups=None` keeps the original
+path byte-for-byte — `folds_primary_v2.csv` is frozen and every Phase 4/5 number is paired against
+it, so a silent change there would invalidate the Phase 5 promotion decision retroactively. There is
+a regression test asserting exactly that.
+
+`results/folds_primary_v3.csv`: 5 folds of 882/882/881/881/881 (identical balance to v2), gold still
+all 58 present for the holdout filter, and **0 report groups straddling folds, against 47 groups /
+190 studies (4.31%) in v2.**
+
+**The grouping key is normalized, and that revises the 2026-09-05 count.** That entry recorded "49
+groups covering 183 studies". Re-measured today, the count depends entirely on how report text is
+compared:
+
+| key | duplicate groups | studies |
+|---|---|---|
+| raw bytes | 46 | 177 |
+| `.strip()` (what the 2026-09-05 entry used) | 49 | 183 |
+| **strip + lowercase + collapse whitespace** | **54** | **204** |
+
+v3 uses the last one. Two reports differing only in case or run-length of whitespace are the same
+report and leak across a fold boundary in exactly the same way, so the conservative key is the
+correct one and it catches 27 studies the byte-identical count misses. Nothing about the earlier
+entry was wrong — it measured what it said it measured — but "byte-identical" was the wrong
+definition of "same report" for this purpose.
+
+### Phase 6 Step 1 pilot: every gate passes on real multi-series studies (2026-09-06)
+
+`knee-phase6-prep-shard0` v1, `PILOT_N=50` (65 studies after unioning in shard 0's 15 gold),
+**0 failed, 0 decode failures**, 74.3 slices stored per study.
+
+**The physical-scale gate is the one that matters, and it is unambiguous: 322 stored series carrying
+90 distinct `PixelSpacing` values came out at exactly one mm/px — 0.38690 = 130/336.** That is the
+defect prep v2 exists to remove, demonstrated rather than asserted. Under the old letterbox those 90
+scales reached the model as 90 different physical magnifications of the same anatomy.
+
+**Slot fill matched the CSV prediction**, which also confirms series on disk and series in
+`train_series.csv` agree — a mismatch there would have been invisible downstream:
+
+| slot | pilot | predicted from CSV |
+|---|---|---|
+| AX_FLUID | 100.0% | 100.0% |
+| SAG_FLUID | 98.5% | 94.2% |
+| SAG_STRUCT | 96.9% | 96.8% |
+| COR_FLUID | 95.4% | 96.4% |
+| COR_STRUCT | 86.2% | 77.3% |
+| AX_STRUCT | 18.5% | 19.4% |
+
+Mean 4.95 of 6 against 4.84 predicted. Laterality routes on the pilot: `Laterality` 34, `geometry`
+27, `SeriesDescription` 2, unresolved (`geometry_midline`) 2 — the geometry route is carrying 42% of
+these studies, as at corpus scale. FOV under the crop: **1 of 322 series** (min 81 mm), so the
+zero-pad path fires about as rarely as predicted.
+
+**Visual gate, 8 studies x 6 slots, rendered and inspected.** Planes are correct per column
+(sagittal profile, coronal condyles, axial cross-section with anterior patella); the `_FLUID` columns
+are visibly fat-suppressed against bright marrow in `_STRUCT`; **the joint sits centred in every
+panel**, which retires the crop-centring risk on real data rather than on the 25-series centroid
+proxy; and `AX_STRUCT` is populated in the five six-slot rows, so the 19.4% slot was actually looked
+at instead of shipping unseen.
+
+### Phase 6 Steps 5-6 groundwork: slot loader and rank-mean (2026-09-06)
+
+Two pieces built while the prep shards run, both local and independent of the artifacts.
+
+**`PreppedSlotDataset`** returns `(image [n_slots, n_groups, 3, H, W], mask [n_slots] bool, labels,
+uid)`. This is the replacement `PreppedStudyDataset`'s own docstring asked for: v1 flattened every
+series into one slice axis and padded by *repeating the last series*, so a study with three
+acquisitions and a study with two look identical to the model — a repeated series and a real second
+series are the same tensor. An absent slot here is zeros with its mask entry false, which is what a
+per-diagnosis attention head needs to decline to attend. The channel axis holds the three adjacent
+slices of a stored group, which is the reason prep stores groups at all. Mirroring stays a load-time
+decision and still respects `mirrors_in_plane` — the slot's plane comes from the slot table, so
+sagittal slots are never flipped.
+
+**`infer.rank_mean`** combines fold predictions by averaging per-label ranks across studies rather
+than averaging probabilities. Macro AUC is invariant under any increasing map, so it reads order and
+nothing else, and a probability mean lets the member with the widest spread dominate. The test that
+pins the claim: three members where one is confident and wrong about two studies and two are
+diffident and right — the probability mean inherits the confident member's error, the rank mean
+follows the majority. `scipy` moved from a transitive scikit-learn dependency to an explicit one in
+`requirements-dev.txt`, since `rankdata` is now imported directly (and it handles ties as ties,
+where an argsort-based rank would invent an ordering the models never expressed).
+
+**175 tests pass** (165 before). Note on verification: this box has 7 GB and a browser open, and the
+torch-importing test files get OOM-killed mid-run when free memory drops under ~600 MB — an `exit
+143` from `pytest` here is the OOM killer, not a failing test. Run them as two groups if that
+happens: the seven torch-free files (119) and the three torch files (56).
+
+### Phase 6 prep v2 ran the corpus; screen notebook built and dry-run (2026-09-07)
+
+All four `phase6-prep-shard` kernels completed. The corpus census is asserted inside the screen
+kernel rather than downloaded — 9.5 GB of artifacts do not need to leave Kaggle to be checked, and
+the training kernel should assert its own inputs anyway. (Worth recording why: the parallel download
+was started and killed — the box has 8.5 GB free on `/`, so pulling three shards would have
+near-filled the disk for information the next kernel reads for free.)
+
+**Model and training loop now carry the slot structure.** `KneeModel.forward` accepts both
+`[batch, n_images, 3, H, W]` and `[batch, n_slots, n_groups, 3, H, W]`, folding the slot and group
+axes itself so `mask` stays addressable per slot, and pools only over present slots. That masking is
+not cosmetic: an absent slot arrives as zeros, and an unmasked mean averages real anatomy with a
+black square, so the bias would scale with how many slots a study is missing — and slot fill runs
+from 100% (AX_FLUID) to 19% (AX_STRUCT), which means the bias would track missingness, a property of
+the scanner protocol rather than of the knee. `train_one_epoch`/`evaluate` read either loader shape
+through `_unpack_batch`, so one loop serves v1 and v2 while v1 is still the artifact behind the last
+scored submission.
+
+**A note on testing the mask.** The first version of that test used a real `efficientnet_b0` and
+asserted that unmasked pooling differs from masked. It does not — an untrained backbone emits nearly
+identical features for black as for noise, so the test passed whether the mask was honoured or
+silently dropped, which is the one thing it exists to catch. It now stubs the backbone with a module
+returning each image's own mean, where the arithmetic is checkable exactly (4.0 masked vs 2.0
+unmasked).
+
+**`report_group_key` moved into `knee/reports.py`** because the screen kernel regenerates folds
+in-kernel and pins them by SHA (`FOLDS_PRIMARY_V3_SHA256 =
+f1d6ba7c341f8d2e82241cb4ddd5ca5131b0c6d2033eb6d2e43bcb597cf12868`) rather than mounting a CSV — the
+Phase 5 pattern. A normalization living only in a scratch script could not be reproduced there.
+
+**The screen dry run caught a bug that would have cost a GPU session.** Running the real training
+path over the 64 pilot artifacts locally failed at scoring: `roc_auc_score` rejects a continuous
+`y_true`, and the notebook was passing the soft pseudo-label scores to both loaders. Phase 5 used
+*two* frames — soft scores as the training target, `(scores >= 0.5)` for evaluation — and the new
+notebook had collapsed them into one. Fixed, and the dry run now completes the full
+loader -> model -> train -> evaluate path.
+
+**One simplification the new artifact allows:** the screen drops Phase 5's `sides` override. That
+existed because v1 artifacts were prepped before the geometry laterality route and carried
+`side=None` for ~49% of studies; `prep_slots` calls `census_study_laterality`, so a v2 artifact
+already carries the geometry-resolved side. Re-applying an external map would be a second source of
+truth for the same fact.
+
+180 tests pass.
+
+### Step 3 re-baseline: prep v2 verified, and it is faster than what it replaces (2026-09-07)
+
+`knee-phase6-screen` v1, fold 0, 2 of 6 slots at 224px, 8 epochs OneCycle + AMP + augmentation,
+3,486 train / 863 val, gold excluded.
+
+| | Phase 5 b4 (prep v1) | Step 3 re-baseline (prep v2) |
+|---|---|---|
+| fold-0 macro | 0.8484 | **0.8574** |
+| minutes | 68.6 | **18.6** |
+| encoder inputs per study | 32 (1 slice each) | 10 (3 adjacent slices each) |
+
+**+0.0090 macro at 3.7x less compute.** Read the sign, not just the band: the gate was "within ~0.01
+with the per-label profile intact, a large *drop* means the prep is wrong", and this is inside the
+band on the good side. The two are not paired — different pixels, different folds — so this is not a
+promotion, it is the row every Phase 6 screen delta gets measured against. The compute number is the
+more useful half: a 5-fold confirm is now ~1.5 h rather than 5.6 h, which buys back most of the
+budget the phase was worried about.
+
+**The physical-scale fix at corpus scale: 21,334 stored series carrying 1,028 distinct
+`PixelSpacing` values, every one of them at 0.38690 mm/px.** The pilot showed 90 distinct spacings
+collapsing to one; the corpus shows 1,028. Under the old letterbox those were 1,028 different
+physical magnifications of the same anatomy, and no downstream capacity recovers that. 4,407
+artifacts, 0 failed studies, 0 decode failures; slot fill matched the CSV prediction exactly (mean
+4.84 of 6); folds v3 verified against its SHA with 0 straddling report groups; laterality routes
+Laterality 2,179 / geometry 2,088 / SeriesDescription 74 / unresolved 66.
+
+**The kernel still exited ERROR, from my own bug:** a `del model, optimizer, scaler, scheduler` was
+inserted ahead of the `torch.save(model.state_dict(), ...)` that follows it, so the checkpoint save
+raised `NameError`. Everything that matters survived — the OOF arrays and the `experiments.csv` row
+are written before the del — so the run is not repeated; only the fold-0 weights are lost, and a
+screen row does not need them. Ordering fixed, with the reason recorded next to it.
+
+### Why the rank blend cannot be the training target, even though it wins on gold (2026-09-07)
+
+The Step 4 gold arm ranked a 5-source rank blend first (0.8976 vs steven_v4's 0.8927). Carrying that
+into c0 as a *training* target was about to be a mistake, and the check that caught it was looking at
+the target's own distribution rather than its AUC:
+
+| label | ours (Phase 5 target) | probability mean x5 | rank blend x5 |
+|---|---|---|---|
+| Fracture | 0.014 | 0.220 | **0.500** |
+| MCL | 0.021 | 0.182 | **0.500** |
+| Lateral OA | 0.025 | 0.303 | **0.500** |
+| Effusion | 0.262 | 0.518 | **0.500** |
+
+Percentile ranks are uniform by construction, so **every label's target mean is exactly 0.500** and
+all prevalence information is gone. AUC never noticed because AUC reads order only — which is
+precisely why the rank blend is the right way to *combine model predictions at submission time*
+(`infer.rank_mean`) and the wrong way to build a target to train against.
+
+The probability mean is usable but not innocent either: the public sources are far more liberal than
+ours (overall mean 0.45 against 0.22), so swapping the target also shifts every label's positive
+rate. **c0 therefore tests `steven_v4` alone against ours** — the cleanest source-vs-source
+comparison, holding the target's construction as close to Phase 5's as the sources allow, and
+steven_v4 is the best *single* source on gold anyway. Rank-blending the sources with a per-label
+recalibration back to a sane prevalence is a follow-up worth trying only if the source swap pays.
+
+### c0 promoted: the public label set trains a better model, and the circular metric said otherwise (2026-09-07)
+
+`knee-phase6-screen` v2 ran both arms in one session, identical in everything but the training
+target, with the 58 gold studies scored for each.
+
+| arm | val macro (own target) | **gold macro** | min |
+|---|---|---|---|
+| re-baseline — our Qwen3-4B | **0.8509** | 0.8279 | 18.5 |
+| c0 — stevenleehans `llm_labels_v4_blend` | 0.8483 | **0.8617** | 17.7 |
+
+**Gold transfer, c0 minus re-baseline: +0.0339 [+0.0067, +0.0625]. CI excludes zero — promoted.**
+
+**The reason this run was designed with a gold arbiter is visible in the first column: on
+val-against-own-target, c0 looks *worse* (0.8483 vs 0.8509), and a screen that compared label
+sources that way would have rejected it.** Each arm graded by its own marker measures how learnable
+a label set is, not which one trains a better model.
+
+The saved OOF arrays give a free home-and-away check at n=863 — both arms scored the same val
+studies in the same order, so either model can be re-scored against either label set:
+
+| scored against | base (ours) | c0 (steven) | paired delta (c0 - base) |
+|---|---|---|---|
+| **our labels** (incumbent's home turf) | 0.8509 | 0.8533 | +0.0024 [-0.0142, +0.0165] |
+| steven_v4 labels (challenger's home turf) | 0.7953 | 0.8483 | +0.0530 [+0.0423, +0.0652] |
+| **gold, n=58** (neutral, rubric-graded) | 0.8279 | 0.8617 | **+0.0339 [+0.0067, +0.0625]** |
+
+Read together these are coherent: c0 **ties on the incumbent's own marker**, wins on its own, and
+wins on the only marker neither model was trained toward. A promotion resting on the challenger's
+home turf alone would be worthless; this one does not. The two label sets agree on only **83.3%** of
+label cells, so these are genuinely different labelings, not a re-scaling.
+
+**Deviation from the plan, stated rather than slipped in:** the plan said c0 "ships on the OOF paired
+delta over the 4,349, not on 58 studies." That instruction cannot be followed as written when the
+*target* is the variable — every OOF is scored against one of the two competing label sets, so it is
+circular by construction. The gold set is the only non-circular instrument available, and the n=863
+cross-scoring above is the power the plan wanted, recovered in the one form that stays neutral.
+
+**Free measurement worth keeping: fold-0 run-to-run noise is about 0.0065.** The same re-baseline
+config ran in v1 and v2 of this kernel and scored 0.8574 and 0.8509 — same code, same folds, same
+data, different seed state. **Any single-fold screen delta smaller than ~0.007 is noise**, which
+retroactively puts Phase 5 screen B's b4-vs-b3 (+0.0052) below the resolution of the instrument that
+measured it — consistent with what that entry already said ("a judgement on mechanism, not a measured
+separation"), but now with a number attached.
+
+Consequence: **steven_v4 is the training target for every subsequent Phase 6 cell.** Our Qwen3-4B
+labels are retired as the primary target after two months as the plan's central edge — kept in
+`results/pseudo_labels_qwen3_4b.csv`, and still the better source on Fracture and Baker's, so a
+per-label blend is a live follow-up.
+
+### c2's attention head built and dry-run while c1 trains (2026-09-07)
+
+`KneeModel(head='slot_attention')` replaces the mean pool with per-diagnosis masked attention over
+slots: one attention score per (slot, diagnosis), softmax over slots with absent slots masked out,
+and a per-diagnosis readout so each label reads its own pooled feature rather than a shared one.
+Groups within a slot are averaged first — they are the same acquisition at different depths, so the
+axis worth attending over is the slot, which is the plane and the weighting.
+
+`attention_weights()` is exposed deliberately: a macro delta says whether c2 helped, and the weights
+say whether it helped *for the reason claimed*. The screen prints them per diagnosis, averaged over
+the gold studies, so "MCL reads the coronal plane" is checkable against anatomy rather than assumed.
+
+**Two of the four new tests would have passed on a broken implementation, which is the interesting
+part.** With a real untrained `efficientnet_b0`, every slot produces nearly the same features, so the
+attention softmax comes out uniform (0.25 across four slots) no matter what the head does — the
+per-diagnosis test passed trivially and proved nothing. Same failure mode as the masked-pooling test
+earlier in the phase. Both now stub the backbone with a module returning each image's own mean, where
+slot features genuinely differ and the arithmetic is checkable; the stub is lifted to module level
+with the reason documented, since it is now needed twice and will be needed again.
+
+Dry-run on the pilot artifacts: 6 slots, attention head, 1 epoch, attention weights `(24, 6, 12)`
+summing to 1 over slots per study, `AX_STRUCT` receiving 0.028 average weight — the mask doing its
+job on the slot that is absent for four studies in five.
+
+### c3 groundwork: differential learning rates and a DINOv2 that builds (2026-09-07)
+
+`differential_param_groups(model, backbone_lr, head_lr)` splits parameters on the `backbone.` prefix.
+A pretrained trunk already represents images well and the head is random, so a single learning rate
+is either low enough not to wreck the trunk or high enough to train the head and cannot be both —
+that split is what makes a 21.6M-parameter backbone usable on 3,486 studies. The slot-attention
+parameters go with the head, since they are as freshly initialised as the linear one.
+
+No explicit block freezing (marked `ponytail:` in the source): a backbone at 8e-6 against a head at
+1e-3 is already a near-freeze, and "last N blocks" is spelled differently on every architecture. Add
+it only if a screen shows the trunk drifting.
+
+**Checked before committing a GPU session to it:** `vit_small_patch14_dinov2.lvd142m` builds and runs
+at **both 224 and 336** (21.6M/21.8M params, 384-dim features). Patch-14 needs an input divisible by
+14, which 224 and 336 both are — worth confirming rather than discovering on Kaggle. It also has to
+be told its input size at construction, because timm's default for that checkpoint is 518 and the
+position embedding is built for it; `KneeModel` now forwards `**backbone_kwargs` to `timm.create_model`
+rather than growing a branch per architecture.
+
+**Known follow-up, not a blocker:** the screen kernel has internet on, so timm downloads the DINOv2
+weights. The *submission* kernel must run offline, so if c3 wins, the weights have to come from an
+attached Kaggle model (`metaresearch/dinov2/PyTorch/small/1` is the public one pilkwang uses) rather
+than a download. That is a Step 7 problem and it is recorded here so it is not discovered at
+submission time.
+
+### c1: six slots pay on the high-power tier and not on the low-power one (2026-09-07)
+
+`knee-phase6-screen` v3, both arms on the steven_v4 target so val-against-own-target is a *legitimate*
+paired comparison this time — same labels, same studies, same order. That was not true for c0, where
+the target itself was the variable.
+
+| arm | val macro (n=863) | gold macro (n=58) | min |
+|---|---|---|---|
+| c0 — 2 slots | 0.8464 | **0.8657** | 18.5 |
+| c1 — 6 slots + presence mask | **0.8580** | 0.8579 | 47.1 |
+
+| tier | c1 - c0 | |
+|---|---|---|
+| **val, n=863** | **+0.0116 [+0.0044, +0.0185]** | CI excludes zero |
+| gold, n=58 | -0.0078 [-0.0338, +0.0181] | spans zero |
+
+**Eleven of twelve labels improve on val** — Synovitis +0.026, PF OA +0.018, Contusion +0.018,
+MCL +0.016 — and only Lateral Meniscus goes backwards (-0.007). The per-label pattern is diffuse
+rather than concentrated in the planes the new slots add, which is what a mean-pool head over more
+input should look like: more evidence, no ability to route it.
+
+**The two tiers do not contradict each other, and it matters not to over-read either.** The gold CI
+[-0.034, +0.018] comfortably contains the val estimate of +0.0116; n=58 simply cannot resolve a
+difference that size. But the direction is worth holding onto, because gold is the tier that
+resembles the test set — rubric-graded from images — while val is scored against report-derived
+labels. A gain that shows up only against report labels would be "better at fitting the LLM's
+reading" rather than better at the task, which is exactly the failure the plan's three-tier structure
+exists to catch. **Unresolved, not resolved in c1's favour.**
+
+**Runtime: 2.5x for +0.0116.** The promotion rule prices 0.01 AUC at 720s, so +0.0116 buys 837s and
+c1 spends 1,716s. It passes for the accuracy submission, where runtime is irrelevant under a 9h cap,
+and **fails for the Efficiency Track** — the first Phase 6 change where the two final submissions
+want different answers. Recorded now so Sub B is not assembled later on the assumption that every
+promoted change belongs in it.
+
+Also: c0 re-ran identically in v2 and v3 and scored gold 0.8617 then 0.8657, val 0.8483 then 0.8464.
+**Gold run-to-run noise is ~0.004 at n=58, val ~0.002** — consistent with the ~0.0065 measured earlier
+on a different config, and a reminder that the gold tier is noisier per point than its CI width alone
+suggests.
+
+Next is c2: the same six slots with per-diagnosis attention instead of the mean pool. Screen B's
+lesson applies directly — a second plane read as a failure alone (b1, +0.0019) and as the phase's
+best finding once the model could use it. c1 is this phase's b1.
+
+### The stale-src failure, third occurrence — and why the existing guard was useless (2026-09-07)
+
+c2 died in the first config of the training loop: `KneeModel.__init__() got an unexpected keyword
+argument 'head'`. `head=` was implemented locally and tested, and `rsna-knee-src` was never
+re-versioned before the kernel was pushed, so the kernel imported a snapshot from before the c2 head
+existed. Same failure as NOTES 2026-09-05, third time on this project.
+
+**The guard that was supposed to prevent this passed.** It read:
+
+```python
+assert 'mask' in inspect.signature(KneeModel.forward).parameters
+assert 'groups' in inspect.signature(make_folds).parameters
+```
+
+Both true — those were the *previous* change. A hand-maintained list of signatures only ever catches
+the mistake that has already been made once, and it has to be extended by exactly the person who is
+already forgetting to sync the dataset. It gave the appearance of protection while checking nothing
+relevant to the run being launched.
+
+Two fixes, because the guard and the habit are different problems:
+
+1. The guard now lists every capability the configs actually use — the `head` and `**backbone_kwargs`
+   arguments, `mask`, `groups`, and `differential_param_groups`'s two rates — with an error naming the
+   real cause ("rsna-knee-src is stale"). **It was tested against a stand-in for the stale signature
+   and seen to fire**, which the previous one never was; a guard nobody has watched fail is an
+   assumption, not a check.
+2. The push step now re-versions the `rsna-knee-src` dataset, waits for it to report ready, and only
+   then pushes the kernel. Versioning costs ~60s against a kernel that costs an hour, so it is
+   unconditional rather than a judgement call about whether this particular push needs it.
+
+Cost this time: one queue slot and ~20 minutes, caught in the first cell of the loop rather than
+after training. The v1 checkpoint bug and this one share a shape — both were mistakes in the
+*scaffolding* around a correct experiment, not in the experiment.
+
+### Correction: the Efficiency Track is AUC-dominated, but "places in neither track" was too strong (2026-09-07)
+
+The 2026-09-06 census entry, the plan and the README all say a fast 0.87 "does not place in either
+track." Worked through properly, that overstates it. Score = `AUC/(0.5 - 0.95) + s/32400`, minimized:
+
+| entry | AUC | min | score |
+|---|---|---|---|
+| a 0.95 rival, brisk | 0.950 | 30 | **-2.0556** |
+| a fast 0.87 | 0.870 | 20 | -1.8963 |
+| us, hypothetical 0.90 | 0.900 | 68 | -1.8741 |
+| us, Phase 5 as submitted | 0.835 | 68 | -1.7296 |
+| **a 0.95 rival, leisurely** | 0.950 | 240 | **-1.6667** |
+
+**A 0.95 model that takes four hours scores worse than our submitted 0.835 at 68 minutes.** So the
+track does what it advertises — it rewards accuracy per second, and a lean weak model genuinely beats
+a heavy strong one. "Places in neither track" was wrong.
+
+What survives from that entry is the part that drives decisions: **the exchange rate is 0.010 AUC per
+12 minutes**, so AUC dominates anything runtime can recover. Cutting 68 minutes to 10 buys the
+equivalent of 0.048 AUC; the gap to a 0.95 rival is 0.115. To match one running at 30 minutes we
+would need **0.925 at zero runtime**. Accuracy is still the priority for both tracks — the conclusion
+was right and the argument for it was not.
+
+The practical consequence is narrower than "ignore runtime": our efficiency pick should be the most
+accurate configuration that stays under roughly half an hour, and c1's 2.5x runtime for +0.0116 is
+exactly the trade to refuse there (+0.0116 is worth 14 minutes; c1 spends 29). It remains the right
+trade for the accuracy submission under a 9h cap.
+
+### c2: the attention head learned the anatomy, and did not measurably beat the mean pool (2026-09-07)
+
+`knee-phase6-screen` v5. Six slots, per-diagnosis masked attention, steven_v4 target, 51.0 min.
+
+| arm | val (n=863) | gold (n=58) | min |
+|---|---|---|---|
+| c0 — 2 slots, mean pool | 0.8464 | 0.8657 | 18.5 |
+| c1 — 6 slots, mean pool | 0.8580 | 0.8579 | 47.1 |
+| **c2 — 6 slots, attention** | **0.8607** | **0.8759** | 51.0 |
+
+| comparison | val (n=863) | gold (n=58) |
+|---|---|---|
+| c2 - c1 | +0.0027 [-0.0035, +0.0092] | +0.0179 [-0.0056, +0.0401] |
+| c2 - c0 | **+0.0143 [+0.0062, +0.0216]** | +0.0101 [-0.0166, +0.0405] |
+
+**c2 is not a measured separation from c1.** The val delta is +0.0027 against a run-to-run noise floor
+of ~0.0065, and both CIs span zero. c2's gold macro is the best of the phase (0.8759) and the gold
+delta leans positive, but at n=58 that is a lean, not a result. The honest statement is: **six slots
+pay (c1 vs c0, CI excludes zero); routing them with attention rather than averaging them does not
+demonstrably pay yet.** This is where Phase 5's b4 decision went wrong in the other direction, and the
+note there — "a judgement on mechanism, not a measured separation" — applies verbatim here.
+
+**But the mechanism is verified, and that is the part worth keeping.** The attention weights, averaged
+over the gold studies, put each diagnosis on the plane the anatomy says it belongs to — with nothing
+in the loss telling it so:
+
+| diagnosis | highest-weight slot | weight | anatomically right? |
+|---|---|---|---|
+| ACL | SAG_FLUID | 0.314 | yes — the ACL is read sagittally |
+| **MCL** | **COR_FLUID** | **0.440** | yes — the MCL is a coronal structure |
+| **Baker's** | **AX_FLUID** | **0.700** | yes — a popliteal cyst is an axial finding |
+| Effusion | AX_FLUID | 0.394 | yes — suprapatellar pouch |
+| Medial Meniscus | COR_FLUID 0.426 / SAG_FLUID 0.335 | | yes — menisci read on both |
+| Contusion | SAG_FLUID 0.377 / COR_FLUID 0.341 | | yes — fluid-sensitive, marrow oedema |
+
+`AX_STRUCT` receives 0.008-0.056 everywhere, which is the mask behaving on the slot that is absent for
+four studies in five. And the val labels that gain most over c1 are exactly the plane-specific ones —
+**Lateral Meniscus +0.032, MCL +0.018** — with Fracture the notable loss (-0.021).
+
+So the head is doing what it was built to do; the macro just cannot yet tell the difference. **Keep
+c2**: it costs 4 minutes over c1, it carries the phase's best gold number, its per-label gains land
+where the mechanism predicts, and a 5-fold confirm scores val on 4,349 studies rather than 863, which
+is roughly 2.3x the resolution and may separate what this screen cannot. Recorded as "kept on
+mechanism at equal cost", not as promoted on a delta.
+
+Process note: the band check printed "OUTSIDE the band -- check the prep" for c2's **+0.0123**. That
+message was written for a large *drop*; a positive delta trips it too. Read the sign, not the verdict.
+
+### c3 launched: DINOv2-small, sized to what the session actually allows (2026-09-07)
+
+A FLOP estimate before booking the session, rather than after losing one to a 12h kill:
+
+| backbone | GFLOPs @224 |
+|---|---|
+| efficientnet_b0 | 0.4 |
+| vit_small_patch14_dinov2 | 6.0 |
+| vit_small_patch14_dinov2 @336 | 15.3 |
+
+**~15x.** Against c2's 51 min for 30 images per study, that puts the configurations at roughly:
+6 slots x 5 groups **13.2 h** (past the cap), 2 x 5 **4.4 h**, 2 x 3 **2.6 h**.
+
+So c3 runs at **2 slots x 5 groups, 224, mean pool** — c0's exact shape. That is not a compromise
+chosen to save time so much as the one that pairs cleanly: c0's arrays are already saved with the same
+input, target and head, so the backbone is the only thing that moves and no control needs re-running.
+The six-slot version is a later question, and it needs either a cheaper backbone or fewer groups.
+
+**The differential learning rate is not a separable second variable.** A pretrained ViT trained at
+OneCycle 3e-4 would be destroyed; "use this backbone" and "run its trunk at 8e-6 against a 1e-3 head"
+are one change, and pretending otherwise would mean screening a configuration nobody would ship.
+
+Constructed and run locally before pushing — 174 backbone parameter tensors against 2 head tensors,
+per-group `max_lr` accepted by OneCycleLR, forward/backward/step clean. `OneCycleLR` takes a list of
+max_lr in param-group order and raises on a length mismatch only at construction, which on Kaggle is
+three minutes into a four-hour booking.
+
+### c3: DINOv2 is not better at this shape, and my runtime model was wrong by 12x (2026-09-07)
+
+| arm | val (n=863) | gold (n=58) | min |
+|---|---|---|---|
+| c0 — 2 slots, efficientnet_b0 | 0.8464 | 0.8657 | 18.5 |
+| c3 — 2 slots, DINOv2-small | 0.8512 | 0.8686 | **23.3** |
+
+| comparison | val | gold |
+|---|---|---|
+| c3 - c0 (backbone isolated) | +0.0048 [-0.0032, +0.0129] | +0.0028 [-0.0223, +0.0285] |
+| c3 - c2 (best so far) | -0.0095 [-0.0183, -0.0007] | -0.0073 [-0.0379, +0.0228] |
+
+**The backbone swap is not a measured improvement.** Both CIs against c0 span zero, and c3's val gain
+is below the ~0.0065 noise floor.
+
+**But the runtime estimate that sized this run was wrong by a factor of twelve.** The FLOP model
+predicted DINOv2 would be ~15x efficientnet_b0; wall clock came in at **1.26x** (23.3 min vs 18.5).
+The reason is architectural: `efficientnet_b0` is FLOP-cheap and *memory-bandwidth-bound* — depthwise
+convolutions leave a T4 badly under-utilised — while a ViT is dense matmul that saturates the tensor
+cores. **FLOPs do not predict wall clock across architecture families**, and I sized c3 down to two
+slots to fit a session that was never at risk. Six slots x five groups with DINOv2 is roughly 70
+minutes, not 13 hours, and was affordable all along.
+
+**Two reasons not to write DINOv2 off on this row.**
+
+1. **It is underfit.** Final training loss 0.4459 against c0's 0.3966, still falling steeply at epoch
+   8 (0.4671 -> 0.4459). A trunk at 8e-6 barely moves in eight epochs; the schedule that suits a
+   from-scratch efficientnet does not suit a frozen-ish pretrained trunk.
+2. **It is a genuinely different model, not a worse one.** Per label against c0: **MCL +0.039,
+   Contusion +0.036, Fracture +0.020, Effusion +0.020** against **ACL -0.032, PF OA -0.022, Lateral
+   Meniscus -0.017**. Complementary strengths that trade off almost evenly in the macro are exactly
+   what makes an ensemble member valuable, and Phase 6 has an ensembling step (`infer.rank_mean`)
+   waiting for members.
+
+Next is the stack: DINOv2 with six slots and the attention head. That pairs against c2 with only the
+backbone moving, is the plan's c5, and — now that the runtime is known rather than modelled — costs
+about 70 minutes. Screen B's lesson is the reason not to stop at c3's null: the coronal series read as
+a failure alone and as the phase's best finding in combination.
+
+### Ensembling the screen arms: free, large, and it rescues c3 (2026-09-07)
+
+Every arm saved its val and gold predictions, so the ensemble question costs no GPU at all. All
+fold-0 models, same 863 val studies and same 58 gold.
+
+| members | val | gold |
+|---|---|---|
+| c0 alone | 0.8464 | 0.8657 |
+| c1 alone | 0.8580 | 0.8579 |
+| c2 alone | 0.8607 | 0.8759 |
+| c3 alone | 0.8512 | 0.8686 |
+| c2+c3 | 0.8715 | 0.8885 |
+| **c1+c2+c3** | **0.8742** | 0.8860 |
+| c0+c2+c3 | 0.8714 | **0.8918** |
+
+**Every pair beats both its members.** c1+c2+c3 against c2 alone is **+0.0116 [+0.0073, +0.0163]** on
+val — the same size as the entire six-slot gain, for no training at all.
+
+**c3 earns its place here, having been null as a single model.** c2+c3 (0.8715) beats c2 (0.8607) by
+more than c2 beat c1, and c3's contribution is exactly the complementarity its per-label profile
+advertised — it is strong on MCL, Contusion, Fracture and Effusion where c2 is weaker. A screen that
+had discarded c3 on its own macro would have thrown away the best ensemble partner in the set.
+
+### Correction: rank-mean lost to probability-mean, 11 combinations out of 11
+
+Step 6 of the plan called rank-mean "one line, unconditional... it cannot lose on the metric", and
+`infer.rank_mean` carries the argument in its docstring: AUC reads order only, so a probability mean
+lets the widest-spread member dominate. **Measured, that is wrong here.**
+
+| | val | gold |
+|---|---|---|
+| prob-mean beats rank-mean | **11 / 11** combinations | 6 / 11 |
+| mean difference | **+0.0016** | +0.0002 |
+| paired, c1+c2+c3 | **+0.0018 [+0.0009, +0.0027]** | — |
+
+The theory is not wrong, its precondition is absent. Rank-averaging protects against members on
+*incomparable scales*; these arms are sigmoid outputs of similarly-trained models on one target, so
+they are already comparable, and ranking throws away agreement strength — how confidently the members
+concur — which is real signal. The pathology it guards against never arises, so only its information
+loss shows up.
+
+`rank_mean` stays in the codebase with the measurement recorded in its docstring: it is the right
+tool for blending members that genuinely differ in calibration (a public model's outputs against
+ours), and the wrong default for a homogeneous fold/config ensemble. Plan Step 6 revised.
+
+This is the second time this phase that a theoretically-motivated choice failed a cheap empirical
+check — the other being the rank blend as a *training* target. Both were caught by looking at the
+thing itself rather than at the argument for it.
+
+### c5 and the ensemble picture; Step 7 begins (2026-09-07)
+
+**c5 — DINOv2 on the full stack — does not beat the efficientnet stack.**
+
+| arm | val (n=863) | gold (n=58) | min |
+|---|---|---|---|
+| c2 — 6 slots + attention, efficientnet_b0 | **0.8607** | **0.8759** | 51.0 |
+| c5 — 6 slots + attention, DINOv2 | 0.8549 | 0.8724 | 60.1 |
+
+c5 - c2: val -0.0059 [-0.0130, +0.0018], gold -0.0035 [-0.0285, +0.0179]. No separation either way,
+but nothing to promote. DINOv2 is underfit again — final loss 0.4441 against c2's 0.3869 — the same
+pattern as c3, and the honest reading is that eight epochs with a trunk at 8e-6 does not finish
+training this backbone rather than that the backbone is worse.
+
+Its attention is markedly **sharper** than c2's while staying anatomically correct: Medial Meniscus ->
+COR_FLUID **0.699** (c2: 0.426), MCL -> COR_FLUID 0.547, ACL -> SAG_FLUID 0.540, Effusion -> AX_FLUID
+0.555, Fracture -> COR_FLUID 0.508. The self-supervised features separate the planes better; that is
+simply not converting into macro AUC at this schedule.
+
+**The phase's gain is in the ensemble, not in any architecture** (probability mean, fold-0 models):
+
+| members | val | gold |
+|---|---|---|
+| c2 alone, best single | 0.8607 | 0.8759 |
+| c2+c3 | 0.8715 | 0.8885 |
+| **c1+c2+c3+c5** | **0.8767** | 0.8897 |
+| c0+c2+c3+c5 | 0.8752 | **0.8962** |
+
+Best ensemble against the best single member: **+0.0159 [+0.0114, +0.0209]**. The top five
+combinations sit inside 0.0025 of one another, which is not a separable difference, so the member set
+should be chosen on cost rather than by taking the maximum — picking the argmax of an unresolvable
+ranking is how a screen overfits its own validation set.
+
+**Step 7 structure.** One kernel per config over five folds, rather than one kernel for the ensemble:
+c2 is ~4.3h, c3 ~1.9h, c5 ~5h, and each fits a session on its own while a combined run would not.
+Members are ensembled afterwards, outside the kernel, which also means adding or dropping one later
+costs nothing. `phase6-confirm` reuses the screen notebook's first three cells verbatim (setup,
+corpus gate, folds and labels) rather than carrying a second copy that can drift.
+
+Verified before pushing: every one of the 4,349 labelled studies lands in exactly one validation fold,
+so the kernel's `assert not np.isnan(oof_pred).any()` will pass for the right reason rather than
+failing four hours in.
+
+### phase6-submit built and dry-run before the confirm finished (2026-09-07)
+
+The submission path is the one place where a mistake costs the whole competition rather than one
+experiment, so it was built and exercised locally while the confirm kernel was still training, using
+five stand-in checkpoints from an untrained model. That tests the plumbing, which is what actually
+fails on a hidden test set; accuracy is the confirm kernel's job.
+
+Verified on the local sample: `prep_slots` runs on **test** DICOMs (1.254 s/study, 4 of 6 slots
+filled on the one study that ships pixels), the artifact round-trips through `save_study_npz` into
+`PreppedSlotDataset`, the **presence mask reaches the model**, five checkpoints load and combine by
+probability mean, `build_submission`'s 0.5 fallback fires for the 2 of 3 studies with no DICOMs
+locally, and the header comes out byte-for-byte including the apostrophe in `Baker's`.
+
+Three deliberate differences from `phase5-submit`, each a consequence of the artifact change rather
+than a preference:
+
+- **Prep at 336 and read at 224, not prep at 224.** Prepping directly at the read size would be
+  faster and wrong — training saw 336 stored and then resized, and that resampling chain is part of
+  what the model learned.
+- **The mask is passed to the model.** Dropping it would make every absent slot read as real black
+  anatomy, reintroducing precisely the bias masked pooling exists to remove, and the only symptom
+  would be a slightly worse score.
+- **Probability mean, not rank mean** — following the 11-of-11 measurement rather than the plan's
+  original instruction.
+
+The src guard here checks `KneeModel`'s `head` argument and the six-slot table, because a stale src
+in *this* kernel does not crash: it silently prepares different pixels from the ones the checkpoints
+were trained on.
+
+### Pre-registered band for the Phase 6 submission, written before the confirm finished (2026-09-07)
+
+Registered now, while the confirm kernel is still on fold 3 and the number is unknown. The Phase 5
+entry's point-estimate extrapolation was retired for over-predicting (0.857 predicted, 0.835 actual),
+so this is a band with a stated reasoning and stated failure conditions, not a forecast.
+
+**What is known.** Two gold-to-LB pairs exist, and their offsets disagree: run 1 gold 0.7252 -> LB
+0.763 (**+0.038**), Phase 5 gold 0.8189 -> LB 0.835 (**+0.016**). Two points rule out a constant
+offset without establishing what replaces it. Separately, c2's *single fold-0 model* scored gold
+0.8759, and a five-fold mean should sit above a single fold — Phase 5's five-fold gold was 0.8189
+against a single-fold configuration screened at 0.8484 val, but the single-fold gold for that config
+was never recorded, so the size of the fold-ensemble gain on gold is genuinely unknown here.
+
+**The band, for the c2-only five-fold submission:**
+
+| LB | reading |
+|---|---|
+| **below 0.83** | something is broken. Phase 5 scored 0.835 from a *worse* gold number, so a drop means the submission path, not the model — suspect prep v2 on test studies or the mask |
+| 0.83 - 0.85 | the gold gain did not transfer. Would say the screens have been optimising against report-derived labels rather than the task |
+| **0.85 - 0.89** | **expected.** The gold improvement (0.8189 -> ~0.88) transfers at something like the observed offsets |
+| 0.89 - 0.91 | better than expected; the fold ensemble is worth more on the hidden set than on 58 gold studies |
+| above 0.91 | implausible from this configuration — check for a leak before celebrating |
+
+**What it is not.** Even the top of that band leaves us short of the 0.93 public-fork shelf and far
+from the 0.950 needed for tenth. A good result here means Phase 6's structural work transferred, not
+that the standing problem is solved; the ensemble submission and whatever follows still have roughly
+0.06 to find.
+
+**One thing this submission specifically tests**, beyond the score: prep v2 has never run against the
+hidden test set. The fold-0 screens all read artifacts built from *training* DICOMs. If the 130mm
+crop, the slot table or the geometry laterality route behave differently on test studies, the
+fallback count and the slot-fill histogram printed by the notebook will say so before the score does.
+
+### c2 confirmed on 5 folds — and fold 0 was not representative (2026-09-07)
+
+`knee-phase6-confirm` v1, 4.02 h, 5 folds of `primary_v3`, target steven_v4, gold excluded from every
+split.
+
+| fold | val macro | gold |
+|---|---|---|
+| 0 | 0.8571 | 0.8699 |
+| 1 | 0.8446 | 0.8634 |
+| 2 | **0.8332** | 0.8616 |
+| 3 | **0.8652** | 0.8597 |
+| 4 | 0.8449 | 0.8576 |
+| **pooled OOF (n=4,349)** | **0.8485** | — |
+| **5-fold mean ensemble** | — | **0.8794** |
+
+**Gold transfer 0.8189 -> 0.8794, +0.0605**, and that *is* a comparable number: the same 58 studies,
+the same rubric labels, both a five-fold ensemble. It is the tier that resembles the hidden test set.
+
+**Pooled OOF 0.8485 is not comparable to Phase 5's 0.8523** and must not be read as a regression —
+different folds (v3 vs v2), a different target (steven_v4 vs our Qwen3-4B) and different pixels. The
+notebook prints that caveat next to the number for the same reason.
+
+**The finding that matters for how the rest of this phase is run: fold 0 is an easy fold.** Its val
+macro is 0.8571 against a pooled 0.8485, and the folds span **0.8332 to 0.8652 — a range of 0.032**,
+five times the ~0.0065 run-to-run noise measured on repeated fold-0 runs. Every Phase 6 screen was
+fold 0 only, so **every screen number in this phase is optimistic by roughly 0.01 in absolute terms.**
+Paired comparisons within fold 0 are unaffected — both arms saw the same easy studies — so the
+promotion decisions stand. But two consequences follow: absolute screen numbers should never be quoted
+as if they were corpus performance, and a single-fold screen cannot resolve anything smaller than the
+fold effect, which makes the earlier "+0.0027 for c2 over c1 is below the noise floor" reading more
+firmly correct, not less.
+
+**The fold ensemble is worth +0.0095 on gold** over the best single fold (0.8699 -> 0.8794), which is
+consistent with the +0.0159 the config ensemble bought on fold-0 val, and confirms that averaging is
+doing real work rather than smoothing noise.
+
+Gold per label at n=58 is wildly dispersed — Baker's 0.9909 and MCL 0.9569 against Synovitis 0.7479
+and Lateral Meniscus 0.7665 — and with 9 to 35 positives per label these are not to be read as a
+per-label profile. The macro is the number.
+
+### Phase 6 scored: LB 0.905, and the shelf is the thing to aim at (2026-09-07)
+
+Submission `56076866`, the c2-only five-fold ensemble, scored **0.905** — up from 0.835, and inside
+the pre-registered band's "0.89-0.91, better than expected" row. **The band worked.** It was written
+before the confirm finished, it named its failure conditions, and the outcome landed where the
+reasoning put it rather than where a point estimate would have.
+
+**The gold->LB offset now has three points and is tightening:**
+
+| run | gold transfer | LB | offset |
+|---|---|---|---|
+| Phase 4 run 1 | 0.7252 | 0.763 | +0.038 |
+| Phase 5 | 0.8189 | 0.835 | +0.016 |
+| **Phase 6** | **0.8794** | **0.905** | **+0.026** |
+
+Three points do not establish a law, but they bracket a range: the next band can be narrower than
+this one, and gold transfer remains the tier worth protecting.
+
+**The leaderboard, pulled today (3,275 teams), and this is the number that should drive the next
+phase:**
+
+| score | rank | teams at or above |
+|---|---|---|
+| 0.954 | 1 | 1 |
+| 0.950 | 8 | 11 |
+| **0.940** | **104** | **130** |
+| **0.930** | **1042** | **1052** |
+| 0.920 | 1294 | 1351 |
+| **0.905 (us)** | **1602** | 1607 |
+| 0.902 | median | — |
+
+**~940 teams are packed into 0.930-0.940.** In that band **+0.01 AUC is worth roughly 940 places** —
+the steepest gradient anywhere on this leaderboard. Crossing 0.93 moves us ~560 places; reaching 0.94
+moves us ~1,500.
+
+Three things follow, and they are why this is written into the plan document and not only here:
+
+1. **The phase target is the shelf, not the podium.** 0.930-0.940 is +0.025 to +0.035 from here.
+   Top-10 needs 0.950 and is a later question.
+2. **We are 0.003 above the median.** 0.905 is not a good standing; it is an average one that took
+   four submissions to reach.
+3. **The shelf is ~940 teams running `pilkwang/rsna-knee-baseline-v1`'s fitted weights**, not 940
+   independent reimplementations. It is not evidence that the recipe-as-trained reaches 0.93 — which
+   matters, because Phase 6 implemented most of that recipe and landed at 0.905.
+
+**What Phase 6 left unspent**, each measured or documented rather than guessed:
+
+| unspent | evidence | cost |
+|---|---|---|
+| config ensemble over 5 folds | +0.0159 [+0.0114, +0.0209] on fold-0 val; the phase's largest CI-excluding-zero result, never confirmed or submitted | ~2 h GPU |
+| DINOv2 trained to convergence | c5 final loss 0.4441 vs c2's 0.3869; c3 still falling steeply at epoch 8; pilkwang runs 10 epochs at these same LRs with DINOv2 as their production backbone | ~47 min |
+| reading at 336 | prep v2 stores 336px (0.387 mm/px) *for the Nyquist argument*, and every screen then downsampled to 224 (0.580). c4 was dropped on a runtime estimate later found wrong by 12x | ~52 min |
+| confidence sample weights | `weight_*` computed and unused since Phase 1; a recipe item | ~51 min |
+| `SLOTS_RECOVERED` | pilkwang's default is `recovered` and `SLOTS_PUBLIC` is their fallback — **Phase 6 shipped the fallback** | free CPU census, then re-prep only if it pays |
+
+**A record-keeping failure worth fixing before the next screen appends a row.** `results/experiments.csv`
+in the repo has **10 rows** — Phase 1 and Phase 4. Every Phase 5 and Phase 6 screen row was written
+inside a Kaggle kernel and never pulled down, and Kaggle keeps only the latest version's output, so
+the earlier arms' rows and prediction arrays are gone. The numbers survive in NOTES prose and nowhere
+queryable. Two consequences already bit: c3's batch size is not recoverable from any local record
+(so Phase 7's s1 re-runs its own control rather than pairing against a config it cannot reproduce),
+and the schema has no `gold_macro` column even though every screen this project has run reports gold
+as its second tier and promotion turns on it.
+
+### Phase 7 Step 1: confidence weights built, and one check ran the wrong way (2026-09-07)
+
+`confidence_from_agreement` in `reports.py`, 7 tests. Per study, per label, the weight falls with
+the **spread across independent label sources** — agreement, not decisiveness, so a study every
+source calls a confident negative keeps full weight.
+
+**Why a weight at all, when the target is already soft.** `steven_v4` carries 130 distinct values,
+so per-label uncertainty is expressed. But soft BCE cannot *discount* a row: a study the sources
+split on carries an irreducible loss floor and actively teaches the model to answer 0.5 there. The
+sample weight is the only place that doubt can be spent. It also uses the multi-source information
+without making a blend the training target, which was rejected on 2026-09-07 for a different reason.
+
+**Four independent labellings vote**, not five files: ours (Qwen3-4B), `steven_v4`, `pilkwang_v2`,
+`lixin73`. Steven ships full/v2/v4_blend but those are one author's successive versions and would
+trip-count that author's reading; `yunusgmsoy` stays excluded for carrying gold values on the 58
+held-out rows.
+
+**The weights are not a no-op** — per-label std 0.27 to 0.56 around a mean of 1:
+
+| label | rows weighted < 0.5 | label | rows weighted < 0.5 |
+|---|---|---|---|
+| **PF OA** | **35.3%** | Baker's | 9.1% |
+| **Effusion** | **30.4%** | Lateral Meniscus | 6.1% |
+| Medial OA | 23.9% | Contusion | 5.1% |
+| Lateral OA | 18.9% | Fracture | 4.1% |
+| MCL | 12.1% | **Synovitis** | **1.2%** |
+| ACL | 10.6% | Medial Meniscus | 9.5% |
+
+**The check that ran the wrong way, recorded because it nearly went unmade.** If source
+disagreement tracked label *quality*, the labels sources fight over should be the ones that score
+worst against gold. Spearman over the 12 labels between disagreement share and `steven_v4`'s gold
+per-label AUC is **+0.40 (n=12, p=0.20)** — the wrong sign, though not separable from zero at this
+n. Synovitis is the extreme case: the four sources agree on it almost perfectly (1.2% disputed) and
+it is the *worst-labelled* of the twelve (gold 0.790). **Agreement is not accuracy** — four LLMs
+reading the same reports share the same systematic blind spots, and unanimity measures the shared
+prior as readily as the truth.
+
+**This does not sink the scheme, and the reason is the normalisation.** Weights are normalised to
+mean 1 **per label**, which was done so a down-weighted run would not also be a lower-effective-
+learning-rate run — and which, as a side effect, removes the entire between-label axis the
+correlation above lives on. The hypothesis under test is strictly *within* label: given two studies
+whose reports the sources read differently, is the disputed one worth less as a training row. That
+is untouched by the per-label finding. But the prior for s3 should be weaker than it was before
+this check, and if s3 reads null this is the reason to reach for first.
+
+`results/label_confidence.csv` (4,407 x 12). The screen computes it in-kernel from the mounted label
+datasets rather than reading this file, so the derivation is reproducible where it is used.
+
+### The census: `_STRUCT` mixes three contrasts, and the CSV axis is not the one I assumed (2026-09-07)
+
+`knee-phase7-census`, CPU, 24,371 series walked in **2.5 min**. TR/TE/`ScanningSequence` recovered
+per series; 1,206 (4.9%) lack TR or TE and are counted as unknown rather than guessed.
+
+| slot | n | T1 | PD | T2 | GRE | unknown | dominant |
+|---|---|---|---|---|---|---|---|
+| SAG_FLUID | 4,667 | 0 | 2,837 | 1,356 | 0 | 474 | PD 67.7% |
+| COR_FLUID | 4,624 | 0 | 3,235 | 1,148 | 1 | 240 | PD 73.8% |
+| AX_FLUID | 4,719 | 2 | 3,039 | 1,165 | 269 | 244 | PD 67.9% |
+| **SAG_STRUCT** | 5,197 | **1,645** | **1,702** | **1,224** | 388 | 238 | **PD 34.3%** |
+| **COR_STRUCT** | 3,985 | 2,854 | 182 | 948 | 0 | 1 | T1 71.6% |
+| **AX_STRUCT** | 1,179 | 570 | 11 | 482 | 107 | 9 | **T1 48.7%** |
+
+**VERDICT against the rule fixed before the run (85% pure): the re-prep earns its day.** Every
+`_STRUCT` slot fails, and SAG_STRUCT fails badly — 1,645 T1, 1,702 PD, 1,224 T2 and 388 GRE, four
+contrasts in near-equal parts arriving at **one attention position**. c2's attention head learned to
+route each diagnosis to a plane; on the `_STRUCT` slots there is no consistent tissue contrast at that
+position to route *to*, and the head cannot tell a T1 from a T2 because nothing in the input says
+which it got.
+
+**The control failed, and the failure is the more useful half of this run.** The `_FLUID` slots were
+predicted to come out overwhelmingly **T2**; they came out overwhelmingly **PD** (68-74%), with zero
+T1 in the sagittal and coronal ones. That is not a bug — **fat-suppressed proton-density is the
+workhorse knee sequence** — and it means the prediction was wrong about what the CSV column encodes.
+
+**So the two axes are genuinely orthogonal, and we have been using one of them:**
+
+- `Fluid_Sensitive` / `Fat_Suppression` (identical columns) encode **fat suppression**, not weighting.
+- TR/TE encode **weighting** (T1 / PD / T2), which `sequence_weighting` recovers and no delivered
+  column carries.
+
+The zero-T1 count in SAG_FLUID/COR_FLUID confirms it: fat-suppressed T1 is rare in knee protocols, so
+the fat-suppression axis and the weighting axis separate cleanly and independently. Phase 6's slot
+table crosses plane × fat-suppression and leaves weighting entirely unexpressed. **That is a stronger
+case for the re-prep than the one the plan was written on** — it is not "the CSV cannot separate T1
+from non-suppressed PD/T2", it is "an entire acquisition axis is invisible to the model", and the
+sagittal slot is where it costs most.
+
+Also worth carrying: **765 gradient-echo series** exist. GRE contrast follows neither the T1 nor the
+T2 rule, so under any TR/TE-only scheme they need their own bucket rather than a silent assignment —
+which is why `sequence_weighting` reports GRE separately rather than folding it in.
+
+`results/weighting_census.csv` and `results/slot_weighting_table.csv` are the kernel's outputs.
+
+### The v3 slot table, designed from the census rather than copied (2026-09-07)
+
+The census says the delivered CSV encodes **fat suppression** and TR/TE encode **weighting**, and that
+those are two orthogonal axes of which Phase 6 used one. The full cross over 4,407 studies:
+
+| combination | study fill | | combination | study fill |
+|---|---|---|---|---|
+| COR_FS_PD | 71.1% | | SAG_FS_T2 | 29.5% |
+| AXI_FS_PD | 65.6% | | SAG_NOFS_T2 | 27.3% |
+| COR_NOFS_T1 | 63.6% | | COR_FS_T2 | 25.2% |
+| SAG_FS_PD | 63.0% | | AXI_FS_T2 | 25.1% |
+| SAG_NOFS_PD | 36.3% | | COR_NOFS_T2 | 16.4% |
+| SAG_NOFS_T1 | 35.9% | | AXI_NOFS_T1 / AXI_NOFS_T2 | 12.4% / 10.8% |
+
+**The defect that a naive recovered scheme would have shipped, caught before prepping anything.**
+1,206 series (4.9%) carry no recoverable TR/TE, and **238 studies (5.4%) consist *entirely* of such
+series** — every one of them a complete 5-to-7-series study covering all three planes, so they are
+not broken studies but one export batch with stripped headers. Under any weighting-only slot table
+those 238 studies get **zero slots**: dropped from training and answered with the 0.5 fallback at
+inference. The threshold makes no difference — at a 0% cut they are still lost, because the problem
+is the unknown bucket, not the rarity of a combination.
+
+**So the table keeps an explicit fallback tier.** The rule: every combination at **>=10% study fill**,
+plus **every `_UNK` combination regardless of fill**, because an unrecoverable weighting is a real
+category and not a leftover. 19 slots:
+
+| | v2 (shipped, LB 0.905) | v3 (proposed) |
+|---|---|---|
+| slots | 6 (plane x fat-sup) | **19** (plane x fat-sup x {T1, PD, T2, UNK}) |
+| mean filled per study | 4.84 | **5.04** |
+| studies with zero slots | 0 | **0** |
+| series represented | — | **23,411 / 24,371 (96.1%)** |
+
+**Storage is roughly unchanged**, which is the part that makes this affordable: the same series are
+sorted into finer buckets rather than more series being stored. Mean fill goes *up* slightly because
+a study with two differently-weighted sagittal series now keeps both instead of one winning the slot.
+
+Two things this does not settle, both for the screen rather than the plan:
+
+- **19 attention positions is not obviously better than 6.** Several slots fill below 30%, and
+  AX_STRUCT at 19.4% was already the one Phase 6 flagged as mostly-masked. More positions means fewer
+  studies teaching each one its routing. This gets screened against the 6-slot table, not assumed.
+- **GRE (765 series) is excluded** by the 10% rule and lands nowhere. It is a fifth contrast whose
+  TR/TE follow neither the T1 nor the T2 rule; folding it into either would be the silent-fallback
+  mistake. Losing it costs at most the studies where it is the *only* series in a plane — worth
+  counting before the prep runs, not after.
+
+### A2: what the 10% rule drops, counted before prepping on it (2026-09-07)
+
+The v3 slot rule discards **960 series (3.9%)**: 764 GRE across three planes, 182 COR_NOFS_PD, and
+14 stragglers. The question that matters is not how many series that is but whether it costs a study
+a whole acquisition plane — the 238-study `_UNK` finding is the precedent for checking.
+
+**19 studies (0.4%) lose a plane** — 9 axial, 7 coronal, 3 sagittal. Two orders of magnitude smaller
+than the `_UNK` problem, and none of them lose *all* their slots. **So GRE does not get its own tier.**
+
+That is a decision about the *first* v3 table, not a permanent one. SAG_NOFS_GRE fills 8.7% of
+studies and AXI_FS_GRE 6.0%, so a GRE tier is three more sparse attention positions — worth adding
+only if the 19-vs-6 slot screen (A5) shows that more positions help at all. Adding them first would
+be expanding the table on the assumption the screen exists to test.
+
+### Prep v3 built and launched: the recovered table, verified against the census before it ran (2026-09-07)
+
+`sequence_weighting`, `SLOTS_V3`, `select_slots_v3`, `study_weightings` and
+`prep_slots(slot_scheme=...)` implemented TDD-first. **238 tests pass** (191 at the phase start).
+Four `phase7-prep-shard{0..3}` kernels pushed to CPU (free quota) while the s1 GPU screen runs — the
+two tracks do not compete for the same budget, which is the whole reason the phase is not serial.
+
+**`select_slots_v3` reproduces the census prediction exactly** over all 4,407 studies: mean **5.04**
+filled slots per study, **0** studies with no slot, every per-slot fill matching to the study. That
+check is worth more than the unit tests: it runs the real function over the real corpus and compares
+against a number derived independently, before 9.7 GB of artifacts get built on it.
+
+**Sized before launching**, per the Phase 6 rule: 456 KB per filled slot on a real study, so
+**9.7 GB total / 2.4 GB per shard** — indistinguishable from v2's 9.5 GB and 2.4 GB. Nineteen slots
+cost nothing extra because the same series are sorted into finer buckets rather than more series
+being stored.
+
+**What the split actually does, on the first real study:**
+
+| | v2 | v3 |
+|---|---|---|
+| slots filled | COR_FLUID, AX_FLUID, **SAG_STRUCT**, AX_STRUCT | COR_FS_T2, AXI_NOFS_T2, **SAG_NOFS_PD**, **SAG_NOFS_T2** |
+
+That study has **two** sagittal non-fat-suppressed series, a PD and a T2. v2 has one `SAG_STRUCT`
+slot, so it kept whichever won the UID tie-break and **discarded the other series entirely**. v3
+keeps both, in slots that say which is which. That is the defect in one line, and it is why mean fill
+goes *up* rather than staying flat.
+
+**Three decisions recorded next to the code rather than left implicit:**
+
+1. **GRE lands nowhere, not in `_UNK`.** `_UNK` means "the header could not answer". GRE is a class we
+   positively identified and chose not to model; filing it under unknown would put a known class in
+   the residual bucket and rebuild the conflation v3 exists to remove. Measured cost: 764 series,
+   19 studies (0.4%) losing a plane, none losing all their slots.
+2. **v2 records `weighting: None`, not `"unknown"`.** v2 never asks; "unknown" means it asked and the
+   header could not answer. Writing "unknown" for both would make them indistinguishable in any later
+   audit — and being unable to audit the slot table after the fact is precisely how Phase 6 shipped
+   this defect.
+3. **v2 stays the default and stays in the codebase** until v3's re-baseline lands, exactly as prep v1
+   outlived prep v2's arrival through Phase 6 Step 3. v2 is the artifact behind the scored 0.905.
+
+**One regression against v2, stated plainly:** v2 needed no header parsing, so it could not be
+surprised by the hidden test set. v3 depends on TR/TE. The `_UNK` tier is the mitigation — an
+unreadable test series lands in a slot the model has actually been trained on, rather than in a guess
+or nowhere — and `study_weightings` derives the axis at prep time rather than looking it up in
+`weighting_census.csv`, because a lookup table would work in every screen and then fail at submission.
+
+### s1: DINOv2 was not underfit — it was memorising. The hypothesis is dead (2026-09-07)
+
+`knee-phase7-screen` v1, two arms in one session, c3's exact shape (2 slots x 5 groups, 224px, mean
+pool, DINOv2-small, AdamW 8e-6 / 1e-3), schedule the only variable.
+
+| arm | val (n=863) | gold (n=58) | min |
+|---|---|---|---|
+| **8 epochs** | **0.8548** | **0.8683** | 20.7 |
+| 16 epochs | 0.8473 | 0.8292 | 41.4 |
+
+| comparison | delta | |
+|---|---|---|
+| **val (n=863), 16ep minus 8ep** | **-0.0075 [-0.0156, -0.0006]** | **CI excludes zero** |
+| **gold (n=58), 16ep minus 8ep** | **-0.0391 [-0.0701, -0.0045]** | **CI excludes zero** |
+
+**Training longer makes it measurably worse on both tiers, both CIs excluding zero.** These are the
+phase's first CI-excluding-zero results and they point the opposite way to the hypothesis that
+motivated the run.
+
+**The training loss is the mechanism, and it settles the argument.** At 16 epochs DINOv2 reached a
+final training loss of **0.3476** -- *below* c2's efficientnet_b0 at 0.3869 -- while both validation
+tiers fell. It is not that the backbone cannot fit this data; it fits it better than the incumbent
+and generalises worse. The Phase 6 inference from "loss 0.4459, still falling" was measuring
+capacity-to-memorise and reading it as unfinished learning.
+
+**The Phase 6 reading was wrong, and worth stating plainly.** The c3 and c5 entries both argued "it is
+underfit -- final training loss 0.4459 against c0's 0.3966, still falling steeply at epoch 8 -- so the
+honest reading is that eight epochs with a trunk at 8e-6 does not finish training this backbone rather
+than that the backbone is worse." **That is falsified.** A training loss still falling at epoch 8 under
+a *fully annealed* OneCycle was memorisation, not unfinished learning; doubling the schedule bought
+more of it. DINOv2 at this shape is not better than efficientnet_b0, and the reason is not the
+schedule.
+
+**The control reproduced c3 almost exactly**, which is why running it was worth 21 minutes:
+
+| | c3 (Phase 6, batch unknown) | s1 8ep control |
+|---|---|---|
+| val | 0.8512 | 0.8548 (+0.0036, inside the ~0.0065 noise floor) |
+| gold | 0.8686 | 0.8683 (**-0.0003**) |
+
+So the configuration matches, the comparison is clean, and the noise floor is re-confirmed at roughly
+where Phase 6 measured it. Had the 16-epoch arm been paired against the recorded row instead, the same
+conclusion would have rested on an unverifiable batch size.
+
+**What this settles, and what it does not.**
+
+- **Branch B applies: c3's 8-epoch configuration is the one to confirm.** No re-screen is needed
+  before its 5-fold confirm, and the confirm is no longer at risk of banking an undertrained member.
+- **The DINOv2 ensemble members stand as they are.** c3 and c5 remain valuable for complementarity
+  (c3 vs c0 per label: MCL +0.039, Contusion +0.036, Fracture +0.020 against ACL -0.032, PF OA -0.022),
+  and the Phase 6 ensemble measurement is untouched by this. What is gone is the *upside* case that a
+  longer schedule would make DINOv2 a better single model.
+- **s4's prior weakens too.** If DINOv2 overfits between 8 and 16, efficientnet at 12 is a smaller
+  version of the same test, and Phase 5's screen A already found that curve turning over between 8
+  and 12. s4 is now the least promising of the remaining v2 screens and should go last.
+- **s2 (336px) is unaffected** and now runs on efficientnet_b0 by default, since s1 leaves DINOv2 no
+  better than it was. That reintroduces the pretraining-scale confound noted when s2 was ordered --
+  read a null there as "336 did not pay *for this backbone*", not as a verdict on resolution.
+
+### Prep v3 ran the corpus: every slot is pure, and the census predicted it exactly (2026-09-07)
+
+All four `phase7-prep-shard` kernels complete. **4,407 studies, 0 failed, 22,208 stored series**,
+every one at **0.38690476 mm/px** — the physical-scale property v2 established, preserved.
+
+**The prediction held to two decimals.** Mean filled slots per study was predicted at **5.04** from
+`weighting_census.csv` before any DICOM was prepped; the real prep on real DICOMs gives **5.04**
+(shard 1: 5.05). **0 studies with no slot**, which is the `_UNK` tier doing exactly the job it was
+added for.
+
+**The defect is fixed, and this is the check that proves it** — slot x recovered weighting over all
+22,208 stored series:
+
+| | PD | T1 | T2 | unknown |
+|---|---|---|---|---|
+| every `*_PD` slot | its own count | 0 | 0 | 0 |
+| every `*_T1` slot | 0 | its own count | 0 | 0 |
+| every `*_T2` slot | 0 | 0 | its own count | 0 |
+| every `*_UNK` slot | 0 | 0 | 0 | its own count |
+
+**A perfect diagonal: no slot holds more than one weighting class.** Against v2, where `SAG_STRUCT`
+alone held 1,645 T1, 1,702 PD, 1,224 T2 and 388 GRE. Corpus weighting mix of what got stored:
+PD 10,403 / T2 5,919 / T1 4,926 / unknown 960.
+
+**Storage came in where it was sized:** 2.17 MB/study mean, **2.39 GB/shard**, against the 2.4 GB
+predicted from one study and v2's actual 2.4 GB. Nineteen slots cost nothing over six.
+
+**Two costs to record, neither fatal:**
+
+1. **Prep is now 3.0 s/study, up from v2's ~1.6.** That is `study_weightings` reading one header per
+   series for *every* series in the study rather than only the selected ones. 55 min per shard on
+   free CPU, run in parallel with a GPU screen — the price is wall-clock nobody was waiting on.
+2. **The table is sparse per study: ~5 filled of 19 (26%), against v2's 4.84 of 6 (81%).** This is
+   the risk flagged when the table was designed, now measured. The distribution is
+   `{2:1, 3:7, 4:364, 5:551, 6:47, 7:57, 8:37, 9:37, 10:1}` for shard 0 — most studies fill 4 or 5.
+   **Fourteen attention positions are empty for the median study**, so each one is taught by a
+   minority of the corpus. Whether that expressiveness beats v2's density is exactly what the
+   19-vs-6 screen exists to answer, and the sparsity is the reason it could plausibly lose.
+
+**One gate is not verifiable from the logs: the visual grid.** It renders as matplotlib images in the
+notebook, not stdout, so "correct plane, weighting and handedness" still needs eyes on
+`knee-phase7-prep-shard0` on Kaggle. Everything countable passed; the pixels themselves have not been
+looked at, and Phase 6's rectangle-squash and sagittal-mirror bugs were both found this way rather
+than by any assertion.
+
+### The two-config submit kernel, built and dry-run before the confirm finished (2026-09-07)
+
+Same discipline as `phase6-submit`: the submission path is the one place a mistake costs the whole
+competition rather than one experiment, so it was built and exercised locally against `data/sample/`
+with **ten stand-in checkpoints from untrained models** while `phase7-confirm-c3` was still training.
+That tests the plumbing, which is what actually fails on a hidden test set; accuracy is the confirm's
+job.
+
+**What the dry run showed, and the middle two rows are the whole point:**
+
+| check | result |
+|---|---|
+| both members load 5 folds each | 10 models total |
+| **c2 reads** | `image(6, 5, 3, 224, 224)`, `mask(6,)`, 4 slots present |
+| **c3 reads** | `image(2, 5, 3, 224, 224)`, `mask(2,)`, 1 slot present |
+| presence mask reaches both models | yes, in both shapes |
+| `build_submission` 0.5 fallback | fired for 2 of 3 (the studies with no local DICOMs) |
+| header byte-exact incl. the apostrophe in `Baker's` | yes |
+| every probability in [0, 1] | yes |
+
+**Two loader shapes, two architectures, one prep pass.** The artifact is written once per study and
+each member reads it with its own slot subset and read size. Sharing one tensor would hand c3 six
+slots it never trained on -- which would not crash, and would only appear as a lower score.
+
+**Three guards this kernel needs that `phase6-submit` did not:**
+
+1. `assert len(SLOTS) == 6` now means something new. `SLOTS_V3` exists in src, and prepping test
+   studies under the nineteen-slot table would file every series differently from what these
+   checkpoints trained on. Silent, and worth exactly the whole submission.
+2. `PREP_SCHEME = 'v2'` is passed explicitly rather than defaulted, so the prep version is a stated
+   fact in the kernel rather than an inherited default that a later change to `prep_slots` could flip.
+3. `backbone_kwargs` is asserted present, because the DINOv2 member needs `img_size` passed through
+   and a src predating that would fail at the first forward, an hour in.
+
+**What this submission does and does not test.** The single variable against 0.905 is a **second
+config** -- 0.905 was already a five-fold average, so this is not a test of "ensembling". Phase 6
+measured c2+c3 at +0.0108 over c2 on fold-0 val, but over *single-fold* members, while the confirm
+separately showed fold-averaging buying +0.0095 on gold. The two effects may substantially overlap,
+so the band's lower edge has to be wider than the fold-0 delta suggests.
+
+### c3 confirmed, and the config ensemble is fully additive to fold averaging (2026-09-08)
+
+`knee-phase7-confirm-c3`, 1.75 h, 5 folds of `primary_v3`, target `steven_v4`, gold excluded from
+every split.
+
+| fold | val macro | gold |
+|---|---|---|
+| 0 | 0.8552 | 0.8600 |
+| 1 | 0.8432 | 0.8723 |
+| 2 | 0.8449 | 0.8677 |
+| 3 | 0.8544 | 0.8612 |
+| 4 | 0.8498 | 0.8740 |
+| **pooled OOF (n=4,349)** | **0.8491** | — |
+| **5-fold mean** | — | **0.8805** |
+
+**c3 matches c2 on both tiers at 43% of the training cost.**
+
+| | pooled OOF | gold | GPU |
+|---|---|---|---|
+| c2 — 6 slots, attention, efficientnet_b0 | 0.8485 | 0.8794 | 4.02 h |
+| **c3 — 2 slots, mean pool, DINOv2-small** | **0.8491** | **0.8805** | **1.75 h** |
+
+Two slots and a mean pool, on a backbone that lost every single-model screen it entered, equal the
+six-slot attention stack. Worth remembering the next time a screen's argument is about mechanism.
+Also note c3's fold spread (0.8432-0.8552, range 0.012) is a *third* of c2's (0.8332-0.8652, 0.032)
+on the identical folds -- the same data is much easier for one architecture to fit consistently.
+
+**The ensemble, and this is the number Submission A rests on:**
+
+| tier | c2 | c3 | **c2+c3** | ensemble vs c2 |
+|---|---|---|---|---|
+| **OOF (n=4,349)** | 0.8485 | 0.8491 | **0.8641** | **+0.0156 [+0.0136, +0.0175]** |
+| gold (n=58) | 0.8794 | 0.8805 | **0.8919** | +0.0125 [+0.0006, +0.0250] |
+
+Both CIs exclude zero on both tiers against c2. Against c3 the OOF delta also excludes zero
+(+0.0150 [+0.0129, +0.0170]); the gold one spans it (+0.0113 [-0.0023, +0.0247]), which is n=58
+failing to resolve a difference the 4,349 sees clearly, not a disagreement.
+
+**Correction to the framing written when the submit kernel was built.** That entry said the fold-0
++0.0108 was measured over *single-fold* members while fold-averaging separately bought +0.0095 on
+gold, so "the two effects may substantially overlap" and the band's lower edge should widen.
+**Measured, they do not overlap at all.** The fold-0 screen saw +0.0159 for the config ensemble over
+single-fold members; here the config ensemble buys **+0.0156 over five-fold members**. Config
+diversity is fully additive to fold averaging, and the caution was unnecessary. The band can be
+written on the +0.0156 rather than discounted from it.
+
+**Why that is the more interesting half:** averaging five folds of one config and averaging two
+different configs are removing *different* errors. Fold averaging cancels what varies with the
+training split; config averaging cancels what varies with architecture and input. Nothing in the
+first exhausts the second, which is also the argument for eventually adding c5 rather than more
+folds of c2.
+
+### Pre-registered band for Submission A, written before it is pushed (2026-09-08)
+
+Registered now, with the kernel built and dry-run but **not** submitted -- next week's GPU. Written
+against measurements, with the failure conditions stated, in the form that worked for Phase 6.
+
+**What is known.** Three gold->LB pairs: 0.7252 -> 0.763 (+0.038), 0.8189 -> 0.835 (+0.016),
+0.8794 -> 0.905 (**+0.026**). The submitted artifact would be the c2+c3 probability mean, whose gold
+is **0.8919** (+0.0125 over the c2-only submission that scored 0.905) and whose pooled OOF delta is
+**+0.0156 [+0.0136, +0.0175]**. Two tiers agreeing on a gain of roughly +0.013 to +0.016.
+
+| LB | reading |
+|---|---|
+| **below 0.905** | **something is broken.** A second config cannot score below a strict subset of itself unless the submission path is wrong -- suspect the c3 loader shape (2 slots vs 6) or a checkpoint/architecture mismatch, not the model |
+| 0.905 - 0.912 | the gain partly transferred. Would say the two members are more correlated on the hidden set than on our folds |
+| **0.913 - 0.925** | **expected.** +0.0125 gold / +0.0156 OOF transferring at something like the observed offsets |
+| 0.925 - 0.935 | better than expected; config diversity is worth more on the hidden set than on 4,349 studies |
+| above 0.935 | implausible from two members. Check for a leak before celebrating |
+
+**What it specifically tests, beyond the score:** the c3 checkpoints have never run against test
+DICOMs, and c3 is the first member whose loader reads a *subset* of the slots. The kernel prints
+slot-fill and fallback counts, which will say whether the 2-slot read behaves on test studies before
+the score does.
+
+**What it is not.** Even the top of that band leaves us below the 0.930 shelf where ~940 teams sit,
+and the shelf is the phase's target. Submission A banks a measured, already-paid-for gain; the
+structural work (prep v3's nineteen slots) is what is supposed to cross the line, and it has not been
+screened yet.

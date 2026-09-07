@@ -1,0 +1,27 @@
+{
+ "id": "mohammadyaserhussain/knee-phase6-screen",
+ "title": "knee-phase6-screen",
+ "code_file": "knee-phase6-screen.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "true",
+ "enable_tpu": "false",
+ "enable_internet": "true",
+ "machine_shape": "NvidiaTeslaT4",
+ "dataset_sources": [
+  "mohammadyaserhussain/rsna-knee-src",
+  "stevenleehans/rsna-knee-llm-report-labels"
+ ],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [
+  "mohammadyaserhussain/knee-phase6-prep-shard0",
+  "mohammadyaserhussain/knee-phase6-prep-shard1",
+  "mohammadyaserhussain/knee-phase6-prep-shard2",
+  "mohammadyaserhussain/knee-phase6-prep-shard3",
+  "mohammadyaserhussain/knee-phase3-label-consume"
+ ],
+ "model_sources": []
+}

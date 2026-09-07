@@ -1,0 +1,19 @@
+{
+ "id": "mohammadyaserhussain/knee-phase6-prep-shard1",
+ "title": "knee-phase6-prep-shard1",
+ "code_file": "knee-phase6-prep-shard1.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "false",
+ "enable_tpu": "false",
+ "enable_internet": "false",
+ "dataset_sources": [
+  "mohammadyaserhussain/rsna-knee-src"
+ ],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [],
+ "model_sources": []
+}

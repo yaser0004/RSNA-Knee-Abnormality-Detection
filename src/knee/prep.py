@@ -6,15 +6,20 @@ import pandas as pd
 from PIL import Image
 
 from knee.dicom import (
+    SLOTS,
     StudyDecodeError,
     _SERIES_PRIORITY,
     _read_slice_header,
+    sequence_weighting,
     census_study_laterality,
     order_slices,
     percentile_clip_to_uint8,
     read_rescaled_pixels,
     select_k_evenly_spaced,
     select_series,
+    select_slice_groups,
+    select_slots,
+    select_slots_v3,
 )
 
 
@@ -89,6 +94,70 @@ def _pad_to_square(image: np.ndarray) -> np.ndarray:
     return padded
 
 
+# Below the field of view of ~99.6% of the corpus (Rows x PixelSpacing has median
+# 160 mm and runs 70-320), so the crop lands inside the acquired image for nearly
+# every study and the rest get padded rather than upscaled.
+CROP_MM = 130.0
+
+# 130 mm / 336 px = 0.387 mm/px. A feature of width d survives resampling only at a
+# pitch <= d/2, and a meniscal tear is 1-3 mm: 224 px gives 0.580 mm/px and misses
+# a 1 mm tear, 336 clears it. Artifacts are stored at 336 so the loader can hand a
+# model either resolution without a second prep run.
+CROP_PX = 336
+
+
+def crop_to_mm(
+    image: np.ndarray,
+    pixel_spacing: tuple[float, float] | list[float] | None,
+    crop_mm: float = CROP_MM,
+    out_size: int = CROP_PX,
+) -> np.ndarray:
+    """Centre-crop a slice to a fixed *physical* extent and resample it to a
+    fixed pixel grid, so every study reaches the model at the same mm/px.
+
+    This replaces the fixed-pixel letterbox, which normalized no physical scale
+    at all: studies in this corpus differ in mm/px by a factor of several, and
+    under the old path the model saw a 3 mm feature at whatever pixel width the
+    acquisition happened to give it. No downstream capacity recovers that.
+
+    `pixel_spacing` is DICOM's [row, column] pair and the two axes are not
+    always equal, so the crop takes a different pixel count on each. A field of
+    view smaller than `crop_mm` is zero-padded *after* centring rather than
+    upscaled -- padding costs the border, upscaling would misstate the scale
+    that is the whole point here.
+
+    Raises ValueError when spacing is missing: falling back to a fixed-pixel
+    crop would silently reintroduce the defect on exactly the rows that can't
+    be checked. prep skips such a series and records it instead."""
+    if pixel_spacing is None:
+        raise ValueError("crop_to_mm needs PixelSpacing; caller must skip a series without it")
+    row_mm, col_mm = float(pixel_spacing[0]), float(pixel_spacing[1])
+    if not (row_mm > 0 and col_mm > 0):
+        raise ValueError(f"non-positive PixelSpacing {pixel_spacing}")
+
+    height, width = image.shape
+    take_rows = min(height, max(1, round(crop_mm / row_mm)))
+    take_cols = min(width, max(1, round(crop_mm / col_mm)))
+    top = (height - take_rows) // 2
+    left = (width - take_cols) // 2
+    cropped = image[top:top + take_rows, left:left + take_cols]
+
+    px_per_mm = out_size / crop_mm
+    out_rows = min(out_size, max(1, round(take_rows * row_mm * px_per_mm)))
+    out_cols = min(out_size, max(1, round(take_cols * col_mm * px_per_mm)))
+    resized = np.array(
+        Image.fromarray(cropped).resize((out_cols, out_rows), Image.BILINEAR)
+    )
+
+    if (out_rows, out_cols) == (out_size, out_size):
+        return resized
+    canvas = np.zeros((out_size, out_size), dtype=resized.dtype)
+    r0 = (out_size - out_rows) // 2
+    c0 = (out_size - out_cols) // 2
+    canvas[r0:r0 + out_rows, c0:c0 + out_cols] = resized
+    return canvas
+
+
 def _failure(series_uid: str, stage: str, transfer_syntax: str | None, exc: Exception) -> dict:
     """One recorded read failure. The except clauses that build these are
     deliberately broad: pydicom surfaces a missing pixel-data handler as
@@ -102,6 +171,208 @@ def _failure(series_uid: str, stage: str, transfer_syntax: str | None, exc: Exce
         "stage": stage,
         "TransferSyntaxUID": transfer_syntax,
         "error": type(exc).__name__,
+    }
+
+
+def _series_headers(series_dir: Path, series_uid: str, decode_failures: list[dict]) -> list[dict]:
+    """Header-only read of every slice in a series directory, recording the
+    ones that fail. Shared by both prep paths so their failure census means the
+    same thing."""
+    headers = []
+    for dcm_path in sorted(series_dir.glob("*.dcm")):
+        try:
+            headers.append(_read_slice_header(dcm_path))
+        except Exception as exc:
+            decode_failures.append(_failure(series_uid, "header", None, exc))
+    return headers
+
+
+def study_weightings(study_dir: Path, series_uids: list[str]) -> dict[str, str]:
+    """Contrast weighting of each of a study's series, from one header apiece.
+
+    Feeds knee.dicom.select_slots_v3, whose weighting axis no delivered CSV
+    carries. Derived here rather than looked up in results/weighting_census.csv
+    on purpose: that census covers the training corpus only, so a lookup would
+    work in every screen and then fail on the hidden test set, which is the worst
+    place to discover it.
+
+    TR/TE are acquisition parameters and constant within a series, so this reads
+    the first slice and stops -- over 24,371 series that is minutes rather than
+    hours, and the census measured the whole corpus at 2.5 minutes this way.
+
+    Anything unreadable is "unknown", which is a real slot in the v3 table rather
+    than a dropped series: 238 studies in this corpus have no recoverable TR/TE
+    on any series at all."""
+    weightings = {}
+    for series_uid in series_uids:
+        slices = sorted((Path(study_dir) / series_uid).glob("*.dcm"))
+        weightings[series_uid] = "unknown"
+        if not slices:
+            continue
+        try:
+            header = _read_slice_header(slices[0])
+        except Exception:
+            continue
+        weightings[series_uid] = sequence_weighting(
+            header["RepetitionTime"], header["EchoTime"], header["ScanningSequence"])
+    return weightings
+
+
+def _decode_selected(
+    selected: list[dict], series_uid: str, decode_failures: list[dict]
+) -> tuple[list[np.ndarray], list[dict]]:
+    """Decode pixels for already-selected slice headers, recording failures and
+    keeping the headers that survived alongside their pixels."""
+    raw_slices, kept_headers = [], []
+    for header in selected:
+        try:
+            raw_slices.append(read_rescaled_pixels(str(header["path"])))
+            kept_headers.append(header)
+        except Exception as exc:
+            decode_failures.append(_failure(series_uid, "pixels", header["TransferSyntaxUID"], exc))
+    return raw_slices, kept_headers
+
+
+def prep_slots(
+    study_uid: str,
+    dcm_root: str | Path,
+    series_df: pd.DataFrame,
+    n_groups: int = 5,
+    crop_mm: float = CROP_MM,
+    out_size: int = CROP_PX,
+    is_gold: bool = False,
+    slot_scheme: str = "v2",
+) -> tuple[dict[str, list[np.ndarray]], dict]:
+    """Phase 6 prep: one study to slot-keyed, physically-scaled pixels.
+
+    Three differences from prep_study, all of which the 2026-09-05 recon named
+    as most of the distance to the public 0.93 shelf:
+
+    - series are assigned to named **slots** (plane x weighting) with no
+      substitution, so an absent view is absent rather than duplicated, and the
+      loader can hand the model an honest presence mask;
+    - slices come in **contiguous groups**, which become an encoder input's
+      three channels;
+    - pixels are cropped to a fixed **physical** extent, so mm/px is a constant
+      across the corpus instead of an accident of acquisition.
+
+    Returns (slot_slices, meta). Only filled slots appear in slot_slices;
+    meta["slots"] carries the full table with None for the empty ones, so
+    "absent" and "failed to decode" stay distinguishable. Slices are stored
+    unmirrored with the resolved side in meta, as in v1 -- mirroring is a
+    load-time decision.
+
+    A slot whose series has no PixelSpacing is dropped rather than cropped at
+    fixed pixels: that fallback is the defect this function exists to remove,
+    and it would apply invisibly to only some studies. The study fails only if
+    no slot survives.
+
+    `slot_scheme` picks the table. "v2" (the default) is plane x fat-suppression,
+    six slots, and is the artifact behind the scored 0.905 submission. "v3" adds
+    the weighting axis recovered from TR/TE -- nineteen slots -- after the
+    2026-09-07 census found SAG_STRUCT alone carrying 1,645 T1, 1,702 PD, 1,224 T2
+    and 388 GRE into one attention position. v2 stays the default until v3's
+    re-baseline lands, the same discipline that kept prep v1 alive through
+    Phase 6 Step 3.
+
+    Only the *filing* changes between schemes: cropping, ordering, normalization
+    and grouping are shared, so a 19-vs-6 screen cannot be confounded by a
+    silent pixel change."""
+    dcm_root = Path(dcm_root)
+    study_dir = dcm_root / study_uid
+
+    if slot_scheme == "v3":
+        study_series = series_df[series_df["StudyInstanceUID"] == study_uid]
+        weightings = study_weightings(study_dir, list(study_series["SeriesInstanceUID"]))
+        slots = select_slots_v3(series_df, study_uid, weightings)
+    elif slot_scheme == "v2":
+        weightings = {}
+        slots = select_slots(series_df, study_uid)
+    else:
+        raise ValueError(f"unknown slot_scheme {slot_scheme!r}; expected 'v2' or 'v3'")
+    if not any(slots.values()):
+        raise StudyDecodeError(f"no series metadata for study {study_uid}")
+
+    census = census_study_laterality(study_dir)
+
+    slot_slices: dict[str, list[np.ndarray]] = {}
+    series_meta: dict[str, dict] = {}
+    skipped_slots: dict[str, str] = {}
+    decode_failures: list[dict] = []
+    patient_sex = None
+
+    for slot_name, series_uid in slots.items():
+        if series_uid is None:
+            skipped_slots[slot_name] = "no series for this plane/weighting"
+            continue
+
+        headers = _series_headers(study_dir / series_uid, series_uid, decode_failures)
+        if not headers:
+            skipped_slots[slot_name] = "no readable slice headers"
+            continue
+        if headers[0]["PixelSpacing"] is None:
+            skipped_slots[slot_name] = "no PixelSpacing"
+            continue
+
+        groups = select_slice_groups(order_slices(headers), n_groups)
+        selected = [header for group in groups for header in group]
+        raw_slices, kept_headers = _decode_selected(selected, series_uid, decode_failures)
+        if len(raw_slices) != len(selected):
+            # a group with a hole in it is not three adjacent slices any more,
+            # and silently shortening it would desynchronise the channels
+            skipped_slots[slot_name] = "a slice group failed to decode"
+            continue
+
+        spacing = kept_headers[0]["PixelSpacing"]
+        slot_slices[slot_name] = [
+            crop_to_mm(s, spacing, crop_mm=crop_mm, out_size=out_size)
+            for s in normalize_series(raw_slices)
+        ]
+
+        first = kept_headers[0]
+        patient_sex = patient_sex or first["PatientSex"]
+        series_meta[series_uid] = {
+            **_series_attributes(series_df, series_uid),
+            "slot": slot_name,
+            "n_slices_stored": len(slot_slices[slot_name]),
+            "n_groups": n_groups,
+            "group_size": len(groups[0]),
+            "crop_mm": crop_mm,
+            "mm_per_px": crop_mm / out_size,
+            "Rows": first["Rows"],
+            "Columns": first["Columns"],
+            "PixelSpacing": spacing,
+            "fov_mm": [first["Rows"] * spacing[0], first["Columns"] * spacing[1]],
+            "PhotometricInterpretation": first["PhotometricInterpretation"],
+            "TransferSyntaxUID": first["TransferSyntaxUID"],
+            "RepetitionTime": first["RepetitionTime"],
+            "EchoTime": first["EchoTime"],
+            "ScanningSequence": first["ScanningSequence"],
+            "SeriesDescription": first["SeriesDescription"],
+            # the recovered class this series was filed under. Recorded so a v3
+            # artifact can be audited after the fact rather than taken on trust.
+            # None under v2, which never asks -- distinct from "unknown", which
+            # means it asked and the header could not answer.
+            "weighting": weightings.get(series_uid),
+        }
+
+    if not slot_slices:
+        raise StudyDecodeError(
+            f"no usable slot for study {study_uid} ({len(skipped_slots)} skipped)"
+        )
+
+    return slot_slices, {
+        "StudyInstanceUID": study_uid,
+        "side": census["side"],
+        "route": census["route"],
+        "is_gold": is_gold,
+        "PatientSex": patient_sex,
+        "n_series_on_disk": census["n_series"],
+        "slot_scheme": slot_scheme,
+        "slots": slots,
+        "series": series_meta,
+        "skipped_slots": skipped_slots,
+        "decode_failures": decode_failures,
     }
 
 
@@ -154,28 +425,13 @@ def prep_study(
             skipped_series[series_uid] = "no .dcm files"
             continue
 
-        headers = []
-        for dcm_path in dcm_files:
-            try:
-                headers.append(_read_slice_header(dcm_path))
-            except Exception as exc:
-                decode_failures.append(_failure(series_uid, "header", None, exc))
+        headers = _series_headers(study_dir / series_uid, series_uid, decode_failures)
         if not headers:
             skipped_series[series_uid] = "no readable slice headers"
             continue
 
         selected = select_k_evenly_spaced(order_slices(headers), k_slices)
-
-        raw_slices = []
-        kept_headers = []
-        for header in selected:
-            try:
-                raw_slices.append(read_rescaled_pixels(str(header["path"])))
-                kept_headers.append(header)
-            except Exception as exc:
-                decode_failures.append(
-                    _failure(series_uid, "pixels", header["TransferSyntaxUID"], exc)
-                )
+        raw_slices, kept_headers = _decode_selected(selected, series_uid, decode_failures)
 
         if not raw_slices:
             skipped_series[series_uid] = "no decodable slices"
@@ -287,6 +543,7 @@ def load_study_npz(
     path: str | Path,
     max_series: int | None = None,
     max_slices: int | None = None,
+    order: list[str] | None = None,
 ) -> tuple[dict[str, list[np.ndarray]], dict]:
     """Read a prepped study back. With both limits None (the default) every
     stored blob is decoded.
@@ -307,7 +564,12 @@ def load_study_npz(
 
     stored = payload["series"]
     series_meta = payload["meta"].get("series", {})
-    ordered = sorted(stored, key=lambda uid: _priority_rank(uid, series_meta))
+    if order is not None:
+        # v2 artifacts are keyed by slot name, and the slot table *is* the
+        # order -- there is nothing for _priority_rank to rank.
+        ordered = [key for key in order if key in stored]
+    else:
+        ordered = sorted(stored, key=lambda uid: _priority_rank(uid, series_meta))
     wanted = ordered if max_series is None else ordered[:max_series]
     series_slices = {
         series_uid: [_decode_jpeg(blob) for blob in stored[series_uid][:max_slices]]
