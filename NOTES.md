@@ -2990,7 +2990,22 @@ phase6 artifact tensor for tensor. Each shard repeats the pixel comparison on 20
 the mounted phase6 shard, in a last cell that runs after the manifests are written, so a failure there
 costs the check and not the shard.
 
-**`phase7-screen-v3`** (GPU, waiting on the src upload) ran both arms end to end locally.
+**`phase7-screen-v3`** (GPU, waiting on the src upload) ran both arms end to end locally, and prints
+the backbone's images per batch over the first epoch: 5.0 against 95 unpacked at nineteen slots on
+the local sample, which is the property that makes the 19-slot arm cost about what the 6-slot arm
+does.
+
+**`phase7-screen-family`** (GPU, waiting on the src upload) is the backbone-family screen, **moved
+ahead of the v3 verdict** rather than run on the winning table afterwards. A member's value is
+diversity against the members that already exist, and both confirmed members read v2, so it runs on
+v2 either way. Arms: `convnext_tiny.in12k_ft_in1k` (apache-2.0) on c2's Adam/OneCycle recipe and
+`eva02_small_patch14_224.mim_in22k` (MIT) on c3's differential AdamW recipe, both on c2's six-slot
+attention config, packed. Both use gradient checkpointing so batch 8 fits a T4 without becoming a
+second variable; that is exact here only because neither backbone has BatchNorm -- checkpointing
+re-runs the forward pass during backward, and a BatchNorm backbone would update its running
+statistics twice per step. **Judged by the gain each adds to c2+c3**, scored against the confirm
+runs' own fold-0 predictions, as a probability mean and a rank mean. The local dry run executed both
+arms and the full report.
 **`phase7-tta`** (GPU, waiting on prep9) ran end to end on mock checkpoints: every labelled study
 predicted at both reads, the reproduction gate and the report executing.
 
