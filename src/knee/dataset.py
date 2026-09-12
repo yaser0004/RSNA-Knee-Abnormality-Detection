@@ -8,6 +8,7 @@ from torch.utils.data import Dataset
 from knee.dicom import (
     SLICE_GROUP,
     SLOTS,
+    SLOTS_V3,
     StudyDecodeError,
     _read_slice_header,
     decode_and_normalize,
@@ -259,7 +260,9 @@ class PreppedStudyDataset(Dataset):
 
 
 _SLOT_NAMES = [name for name, _, _ in SLOTS]
-_SLOT_PLANES = {name: plane for name, plane, _ in SLOTS}
+# planes from every table, so a loader can read v3 artifacts by name; the default
+# read stays the six-slot table the scored checkpoints were trained on
+_SLOT_PLANES = {name: plane for name, plane, *_ in (*SLOTS, *SLOTS_V3)}
 
 
 class PreppedSlotDataset(Dataset):
@@ -361,15 +364,14 @@ class PreppedSlotDataset(Dataset):
 
         side = self.sides.get(study_uid, meta.get("side"))
         size = self.out_size
-        # an absent slot is zeros at whatever the artifact's stored resolution
-        # is, not at out_size -- they are stacked together and resized once
-        stored_shape = next(iter(stored.values()))[0].shape
         blocks = []
         present = []
         for name in self.slots:
             slices = stored.get(name)
             if not slices:
-                blocks.append(np.zeros((self.n_groups, SLICE_GROUP, *stored_shape), np.float32))
+                # made at out_size, not stored size: resizing the zeros of absent
+                # slots dominated load time once the table grew to 19 slots
+                blocks.append(torch.zeros(self.n_groups, SLICE_GROUP, size, size))
                 present.append(False)
                 continue
 
@@ -377,15 +379,13 @@ class PreppedSlotDataset(Dataset):
             slices = [mirror_to_canonical(s, flip_side, canonical=self.canonical)
                       for s in slices]
             slices = self._select_groups(slices)
-            arr = np.stack(slices).astype(np.float32) / 255.0
-            blocks.append(arr.reshape(self.n_groups, SLICE_GROUP, *arr.shape[-2:]))
+            arr = torch.from_numpy(np.stack(slices).astype(np.float32) / 255.0)
+            if arr.shape[-2:] != (size, size):
+                arr = TF.resize(arr.unsqueeze(1), [size, size], antialias=True)
+            blocks.append(arr.reshape(self.n_groups, SLICE_GROUP, size, size))
             present.append(True)
 
-        volume = torch.from_numpy(np.stack(blocks))
-        if volume.shape[-1] != size or volume.shape[-2] != size:
-            flat = volume.reshape(-1, *volume.shape[-2:]).unsqueeze(1)
-            volume = TF.resize(flat, [size, size], antialias=True).reshape(
-                len(self.slots), self.n_groups, SLICE_GROUP, size, size)
+        volume = torch.stack(blocks)
         if self.augment:
             # one transform per study, applied to every slot and channel: a
             # study is a single sample, and jittering slots independently would

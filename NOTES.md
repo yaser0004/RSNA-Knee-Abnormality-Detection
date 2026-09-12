@@ -2863,3 +2863,112 @@ the score does.
 and the shelf is the phase's target. Submission A banks a measured, already-paid-for gain; the
 structural work (prep v3's nineteen slots) is what is supposed to cross the line, and it has not been
 screened yet.
+
+### The field moved again, and the top of it is spikes, not a shelf (2026-09-13)
+
+Leaderboard pulled 2026-09-12, before Submission A. **3,620 teams** (345 more than on 2026-09-07),
+1st **0.955**, median **0.909** (was 0.902). **Our 0.905 is now below the median**, rank ~1855.
+
+The 2026-09-07 entry described 0.930-0.940 as a shelf of ~940 teams. At one-thousandth resolution it
+is not a shelf. It is **spikes of identical scores**, each a public fitted-weights notebook forked
+hundreds of times:
+
+| score | teams at exactly | teams at or above | our rank if we score it |
+|---|---|---|---|
+| 0.925 | 13 | 1,400 | 1,401 |
+| 0.930 | 18 | 1,308 | 1,309 |
+| 0.935 | 63 | 1,201 | 1,202 |
+| **0.936** | **379** | 1,138 | 1,139 |
+| 0.937 | 89 | 759 | **760** |
+| 0.940 | 140 | 531 | 532 |
+| **0.941** | **264** | 391 | 392 |
+| 0.942 | 22 | 127 | **128** |
+
+Ranks are counted **behind** every team already at that score, because ties go to the earlier
+submission. That convention matters more than usual here: reaching a spike's score exactly places us
+behind the whole spike.
+
+**So the targets are lines, not a band: 0.937, then 0.942.** +0.001 past 0.936 is worth 379 places;
++0.001 past 0.941 is worth 264. For scale, 0.905 -> 0.930 (+0.025) buys 546 places and
+0.930 -> 0.937 (+0.007) buys another 549 -- the steep part of the curve moved up.
+
+**What the 0.94 tier is made of**, read from the public notebooks rather than guessed.
+`tonylica/rsna-knee-dino-radimagenet-rank-ensemble` documents its own blend: DINOv2-small x20,
+DINOv3-small x5 (fold ranks), and ten RadImageNet attention heads sharing one ResNet-50 encoder,
+combined by per-member, per-target percentile rank. The other top notebooks mount the same stack
+(`antoinegg1/rsna-knee-e11-diverse-heads-v20`, `antoinegg1/rsna-knee-e9-radimagenet-heads-v15`,
+`mattiaangeli/rsna-knee-coat-resgated-ep10-top3`, `pilkwang/rsna-knee-weights`). **None of it is
+usable here, for three separate reasons:**
+
+- the heads were fitted on this competition by other teams and could not be documented as ours in a
+  winner's deliverable;
+- RadImageNet weights are CC BY-NC-SA, and share-alike conflicts with releasing a winning solution
+  under CC-BY-NC 4.0;
+- **DINOv3** ships under Meta's DINOv3 licence, whose §1.b.i requires derivative works to be
+  distributed under that same agreement -- the same conflict. Recorded so it is not re-litigated.
+
+Permissive alternatives, checked on their model cards: `convnext_tiny.in12k_ft_in1k` (apache-2.0,
+27.8M, no BatchNorm), `eva02_small_patch14_224.mim_in22k` (MIT, no BatchNorm),
+`tf_efficientnetv2_s.in21k_ft_in1k` (apache-2.0).
+
+**What *is* usable from the same notebooks:** averaging over overlapping slice windows at inference
+(`TTA_OVERLAP`), 224px and 336px runs kept as *separate ensemble members* rather than a choice between
+them, backbone-family diversity, and a rank blend across families.
+
+**Two consequences for reading Submission A.** The band's middle row got less diagnostic: with the
+median up 0.007 since it was written, 0.905-0.912 no longer separates "the gain did not transfer"
+from "the public LB drifted". Its lower edge still does -- a strict superset cannot score below its
+subset. And whatever it scores, it is a from-scratch two-member ensemble next to 35-member fork
+stacks; whether the method is improving is still answered by gold transfer, not rank.
+
+**Time left:** entry deadline Oct 15, final submission Oct 22 -- about five weekly GPU quotas.
+
+### Two defects on the slot path, fixed before any v3 screen could run (2026-09-13)
+
+Neither crashed a v2 run. Both would have shaped the v3 screen.
+
+**`_SLOT_PLANES` knew only the six-slot table.** `PreppedSlotDataset` looks up each slot's plane to
+decide mirroring, and the lookup was built from `SLOTS` alone, so the first v3 slot name raised
+`KeyError` before a pixel loaded. It is now built from both tables; the default read stays v2.
+
+**The backbone ran on absent slots.** An absent slot arrives as zeros and the mask kept it out of
+pooling, but every zero image still went through the backbone. That cost twice: efficientnet_b0's 49
+BatchNorm layers averaged one black image per missing slot into their training statistics, and at
+19 slots with 5.04 filled on average, **73% of backbone compute would have been zeros**. Present
+images are now packed before the backbone and absent positions get zero features.
+
+What that changes, and what it does not:
+
+- **Eval-mode logits are unchanged for every study with at least one present slot.** Tested against
+  the unpacked path on both heads, with a stub that makes slots distinguishable (rows carry different
+  present patterns, so a mis-scatter cannot pass) and with a real efficientnet whose BatchNorm offsets
+  are non-zero. The c2 and c3 confirm checkpoints -- and Submission A -- are the same models under
+  the new code.
+- **A study with no present slot now reads only the label bias.** Before, it pooled
+  `backbone(zeros)`, which is non-zero once BatchNorm has trained offsets; the attention docstring
+  already claimed bias-only. Such studies get 0.5 from `build_submission` and never used the output.
+- **Training dynamics do change** for BatchNorm backbones: batch statistics now come from anatomy
+  only, and the backbone's effective batch varies with fill. That is why the v3 screen runs *both*
+  arms packed, rather than pairing a packed 19-slot arm against the unpacked c2 rows.
+
+**A third cost, found by timing rather than reading.** The loader built absent slots as zeros at the
+stored 336px and resized them along with everything else. Synthetic studies, 5 filled slots, one
+torch thread as inside a DataLoader worker:
+
+| read | before | after |
+|---|---|---|
+| v2, 6 slots | 320 ms/study | 83 ms/study |
+| v3, 19 slots | **1,243 ms/study** | **120 ms/study** |
+
+Before the change the 19-slot read cost 3.9x the 6-slot one *for the same five series* -- nearly all
+of it resizing zeros, which would have made the v3 arm loader-bound and confounded the screen's
+runtime. Output is identical: antialiased resize is per image, and zeros resize to zeros. The v2 read
+also got ~4x faster, which its single absent slot does not explain; the cause was not investigated.
+Synthetic pixels decode unlike real JPEGs, so the absolute numbers are indicative only.
+
+**A test that passed for the wrong reason.** The bias-only test and the equivalence tests passed
+*before* the fix. An untrained BatchNorm maps black to exactly zero features, so skipping an absent
+slot and running it were indistinguishable. They became meaningful only once the test backbone was
+given non-zero BatchNorm offsets, and then the bias-only test failed as it should.
+
+**246 tests pass** (238 before).

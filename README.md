@@ -29,13 +29,15 @@ inside its pre-registered band; **Phase 7 in progress** — the recovered slot t
 built and the corpus re-prepped, c3 is confirmed on five folds, and the two-config ensemble measures
 **+0.0156 [+0.0136, +0.0175]** pooled OOF over the submitted model — see below.**
 
-**Where we actually stand, and what Phase 7 aims at.** As of 2026-09-07 the field is 3,275 teams:
-1st 0.954, 10th **0.950**, median **0.902**, and we are **0.905, rank 1602** — three thousandths
-above the median. The shape that matters is a shelf: **~940 teams are packed into 0.930–0.940**, so
-in that band **+0.01 AUC is worth ~940 places**. Phase 7 therefore targets **0.930–0.940**, not the
-podium. That shelf is teams running `pilkwang/rsna-knee-baseline-v1`'s *fitted weights*, not 940
-independent reimplementations — which matters, because Phase 6 implemented most of that recipe and
-landed at 0.905.
+**Where we actually stand, and what Phase 7 aims at.** As of 2026-09-12 the field is 3,620 teams:
+1st 0.955, median **0.909**, and our 0.905 now sits **below** the median at rank ~1855. The top is
+not a smooth shelf but **spikes of identical scores** — 379 teams at exactly 0.936, 140 at 0.940,
+264 at 0.941 — each a public fitted-weights notebook forked hundreds of times. Ties go to the earlier
+submission, so reaching a spike's score lands behind all of it: 0.936 is rank 1,139, **0.937 is rank
+760**, 0.941 is rank 392 and **0.942 is rank 128**. Phase 7 targets those two lines. The notebooks at
+0.94 stack DINOv2, DINOv3 and RadImageNet heads fitted by other teams; none of that can be used here
+(other teams' fitted heads, and weights whose licences conflict with the CC-BY-NC 4.0 winner
+licence), which is why the measure of progress stays our own gold transfer rather than rank.
 
 **Phase 6 existed because of an earlier leaderboard pull, and the framing was uncomfortable.** As of
 2026-09-06 the field was 3,221 teams: 1st 0.954, 10th **0.950**, median **0.899**, and roughly a
@@ -48,13 +50,14 @@ rival that runs in 30 minutes would need 0.925 *at zero runtime*. (It is not hop
 model taking four hours scores worse than our submitted 0.835 at 68 minutes, because the track really
 does reward accuracy per second — but accuracy is the lever in both tracks.)
 
-**Phase 7 so far.** Three findings, each measured rather than assumed:
+**Phase 7 so far.** Four findings, each measured rather than assumed:
 
 | finding | evidence |
 |---|---|
 | **An acquisition axis was invisible to the model.** `train_series.csv`'s one column encodes *fat suppression*; TR/TE encode *weighting*, and they are orthogonal. `SAG_STRUCT` alone carried 1,645 T1, 1,702 PD, 1,224 T2 and 388 GRE into a single attention position | corpus header census, 24,371 series in 2.5 min |
 | **DINOv2 was overfitting, not underfitting.** Phase 6 read "training loss still falling at epoch 8" as unfinished learning. At 16 epochs the loss falls *below* efficientnet's while both validation tiers drop | val −0.0075 [−0.0156, −0.0006], gold −0.0391 [−0.0701, −0.0045], both CIs excluding zero |
 | **Config diversity is fully additive to fold averaging.** c2+c3 over five folds each beats either member by the same margin the fold-0 screen measured over single-fold members | OOF +0.0156 [+0.0136, +0.0175]; gold 0.8919 vs 0.8794 |
+| **Absent slots were still run through the backbone.** The mask kept them out of pooling, but each fed a black image into BatchNorm's training statistics, and at 19 slots they would be 73% of backbone compute. Now packed out before the backbone; eval logits are unchanged for any study with a present slot, so the scored checkpoints are unaffected | equivalence tests on both heads; 19-slot load 1,243 → 120 ms/study |
 
 **Prep v3** re-prepped all 4,407 studies into a nineteen-slot table (plane × fat-suppression ×
 {T1, PD, T2, UNK}) with 0 failures, mean 5.04 filled slots per study against a census prediction of

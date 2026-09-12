@@ -44,7 +44,7 @@ class KneeModel(nn.Module):
         (AX_FLUID) down to 19% (AX_STRUCT), that bias would track missingness,
         which is not a property of the knee."""
         if self.head_kind == "slot_attention":
-            slot_features = self._slot_features(x)
+            slot_features = self._slot_features(x, mask)
             return self._attend(slot_features, mask)[0]
 
         if x.dim() == 6:
@@ -54,20 +54,45 @@ class KneeModel(nn.Module):
             n_groups = 1
 
         batch, n_images, channels, height, width = x.shape
-        features = self.backbone(x.reshape(batch * n_images, channels, height, width))
+        present = None if mask is None else mask.repeat_interleave(n_groups, dim=1)
+        features = self._backbone_features(
+            x.reshape(batch * n_images, channels, height, width), present)
         features = features.view(batch, n_images, -1)
 
         if mask is None:
             return self.head(features.mean(dim=1))
 
-        weights = mask.to(features.dtype).repeat_interleave(n_groups, dim=1).unsqueeze(-1)
+        weights = present.to(features.dtype).unsqueeze(-1)
         # a study with no present slot would divide by zero; it is already
         # destined for build_submission's 0.5 fallback, but the model must not
         # be what raises first
         denominator = weights.sum(dim=1).clamp(min=1.0)
         return self.head((features * weights).sum(dim=1) / denominator)
 
-    def _slot_features(self, x: torch.Tensor) -> torch.Tensor:
+    def _backbone_features(self, images: torch.Tensor,
+                           present: torch.Tensor | None) -> torch.Tensor:
+        """Backbone features for [N, 3, H, W], computed only for present images.
+
+        `present` is [batch, n_images] of bool in the same order as `images`.
+        An absent slot is a black square, and running it through the backbone
+        costs twice: BatchNorm's training statistics average in one black image
+        per missing slot, so what counts as normal shifts with how incomplete a
+        batch's studies are; and at 19 slots with ~5 filled, most of the forward
+        pass is spent on zeros. Absent positions get zero features, which the
+        mask then ignores. For a study with any present slot the eval-mode
+        logits are unchanged, since running statistics make each image's
+        features independent of its batch."""
+        if present is None:
+            return self.backbone(images)
+        keep = present.reshape(-1)
+        if not keep.any():
+            return images.new_zeros(images.shape[0], self.backbone.num_features)
+        kept = self.backbone(images[keep])
+        features = kept.new_zeros(images.shape[0], kept.shape[-1])
+        features[keep] = kept
+        return features
+
+    def _slot_features(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """[batch, n_slots, n_groups, 3, H, W] -> one feature per slot, averaged
         over that slot's groups. Groups within a slot are the same acquisition at
         different depths, so averaging them is a within-slot summary; the axis
@@ -79,7 +104,8 @@ class KneeModel(nn.Module):
             )
         batch, n_slots, n_groups, channels, height, width = x.shape
         flat = x.reshape(batch * n_slots * n_groups, channels, height, width)
-        features = self.backbone(flat).view(batch, n_slots, n_groups, -1)
+        present = None if mask is None else mask.repeat_interleave(n_groups, dim=1)
+        features = self._backbone_features(flat, present).view(batch, n_slots, n_groups, -1)
         return features.mean(dim=2)
 
     def _attend(self, slot_features: torch.Tensor,
@@ -106,4 +132,4 @@ class KneeModel(nn.Module):
         Exposed because it is the claim c2 makes: a mean-pool head cannot say
         "MCL lives in the coronal plane", and this one should be checkable
         against the anatomy rather than trusted."""
-        return self._attend(self._slot_features(x), mask)[1]
+        return self._attend(self._slot_features(x, mask), mask)[1]

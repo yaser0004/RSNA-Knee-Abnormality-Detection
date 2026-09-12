@@ -180,6 +180,87 @@ def test_slot_attention_requires_a_slot_axis():
         _attn_model()(torch.randn(1, 4, 3, SIZE, SIZE))
 
 
+# --- Phase 7: absent slots never reach the backbone -------------------------------
+
+# Rows get different present patterns, so features scattered back into the wrong
+# slot position cannot pass as correct.
+PACK_MASK = torch.tensor([[True, False, True, False], [True, True, False, False]])
+
+
+def _with_trained_offsets(model):
+    # An untrained BatchNorm maps a black image to exactly zero features, which
+    # hides any difference between skipping an absent slot and running it.
+    # Trained BatchNorm offsets do not, so give the backbone some.
+    for module in model.backbone.modules():
+        if isinstance(module, torch.nn.BatchNorm2d):
+            torch.nn.init.constant_(module.bias, 0.1)
+    return model
+
+
+def _packable_batch(n_groups=2):
+    # each present slot a distinct constant, absent slots zeros as the loader
+    # delivers them
+    values = torch.arange(1, 9, dtype=torch.float32).view(2, 4, 1, 1, 1, 1)
+    return values.expand(2, 4, n_groups, 3, SIZE, SIZE) * PACK_MASK.view(2, 4, 1, 1, 1, 1)
+
+
+@pytest.mark.parametrize("head", ["mean", "slot_attention"])
+def test_absent_slots_never_reach_the_backbone(head):
+    # BatchNorm's training statistics would otherwise average in a black square
+    # per missing slot, and at 19 slots with ~5 filled most of the backbone's
+    # work would be spent on zeros
+    model = _stub_backbone(KneeModel(backbone_name="efficientnet_b0", num_labels=12,
+                                     pretrained=False, head=head))
+    seen = []
+    model.backbone.register_forward_pre_hook(lambda _module, args: seen.append(args[0]))
+
+    model(_packable_batch(n_groups=3), mask=PACK_MASK)
+
+    assert [images.shape[0] for images in seen] == [int(PACK_MASK.sum()) * 3]
+    assert all(float(image.abs().sum()) > 0 for image in seen[0])
+
+
+@pytest.mark.parametrize("head", ["mean", "slot_attention"])
+@pytest.mark.parametrize("stubbed", [True, False])
+def test_skipping_absent_slots_leaves_eval_logits_unchanged(head, stubbed):
+    # The c2/c3 checkpoints were trained with every slot through the backbone.
+    # Eval-mode BatchNorm uses running statistics, so a study with at least one
+    # present slot must get the same logits either way, or those checkpoints
+    # stop being the models their confirm scores describe. The stub makes slots
+    # distinguishable; the real backbone exercises BatchNorm.
+    torch.manual_seed(0)
+    model = KneeModel(backbone_name="efficientnet_b0", num_labels=12, pretrained=False, head=head)
+    model = _stub_backbone(model) if stubbed else _with_trained_offsets(model)
+    model.eval()
+    x = _packable_batch()
+
+    with torch.no_grad():
+        packed = model(x, mask=PACK_MASK)
+        everything = model.backbone(x.reshape(-1, 3, SIZE, SIZE)).view(2, 4, 2, -1)
+        if head == "slot_attention":
+            reference = model._attend(everything.mean(dim=2), PACK_MASK)[0]
+        else:
+            weights = PACK_MASK.to(everything.dtype).view(2, 4, 1, 1)
+            pooled = (everything * weights).sum(dim=(1, 2)) / (PACK_MASK.sum(dim=1, keepdim=True) * 2)
+            reference = model.head(pooled)
+
+    assert torch.allclose(packed, reference, atol=1e-4)
+
+
+def test_slot_attention_with_no_present_slot_reads_only_the_label_bias():
+    # Nothing reaches the backbone, so the pooled feature is zero and only the
+    # bias survives. Such a study is answered 0.5 by build_submission anyway;
+    # this pins that the model does not invent features for it from black.
+    model = _with_trained_offsets(_attn_model())
+    model.eval()
+    with torch.no_grad():
+        model.label_bias.fill_(0.3)
+        logits = model(torch.zeros(1, 2, 1, 3, SIZE, SIZE),
+                       mask=torch.zeros(1, 2, dtype=torch.bool))
+
+    assert torch.allclose(logits[0], model.label_bias)
+
+
 def test_backbone_kwargs_reach_timm():
     # DINOv2 is patch-14 with a default img_size of 518; built at the default it
     # rejects a 224 input on the position embedding. c3/c4 need to say what size

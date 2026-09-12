@@ -14,7 +14,7 @@ from knee.dataset import (
     StudyDecodeError,
     augment_volume,
 )
-from knee.dicom import SLICE_GROUP, SLOTS
+from knee.dicom import SLICE_GROUP, SLOTS, SLOTS_V3
 from knee.infer import LABEL_COLUMNS, build_submission
 from knee.prep import save_study_npz
 
@@ -503,6 +503,33 @@ def test_slot_dataset_mirrors_only_the_planes_where_left_right_is_in_plane(tmp_p
     assert np.allclose(sag, asym / 255.0, atol=0.02), "sagittal must not be flipped"
     assert np.allclose(cor, np.fliplr(asym) / 255.0, atol=0.02), "coronal must be flipped"
     assert sag[0, 0] < sag[0, -1] and cor[0, 0] > cor[0, -1]
+
+
+def test_slot_dataset_reads_v3_slot_names_and_mirrors_by_their_plane(tmp_path):
+    # the plane lookup was built from the six-slot table alone, so a v3 name
+    # raised KeyError before a single pixel loaded -- and the mirroring rule has
+    # to hold for the new names exactly as it does for the old ones
+    uid = "v3"
+    names = [name for name, *_ in SLOTS_V3]
+    asym = np.tile(np.arange(8, dtype=np.uint8) * 30, (8, 1))
+    slot_slices = {name: [asym.copy() for _ in range(SLICE_GROUP)]
+                   for name in ("SAG_FS_PD", "COR_FS_PD")}
+    meta = {"StudyInstanceUID": uid, "side": "L", "route": "Laterality", "is_gold": False,
+            "slot_scheme": "v3",
+            "slots": {name: (name if name in slot_slices else None) for name in names},
+            "series": {name: {"slot": name, "n_slices_stored": SLICE_GROUP}
+                       for name in slot_slices}}
+    save_study_npz(tmp_path / f"{uid}.npz", slot_slices, meta)
+
+    image, mask, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=1, out_size=8,
+                                           slots=names)[0]
+
+    assert tuple(image.shape[:2]) == (len(SLOTS_V3), 1)
+    assert int(mask.sum()) == 2
+    sag = image[names.index("SAG_FS_PD"), 0, 0].numpy()
+    cor = image[names.index("COR_FS_PD"), 0, 0].numpy()
+    assert np.allclose(sag, asym / 255.0, atol=0.02), "sagittal must not be flipped"
+    assert np.allclose(cor, np.fliplr(asym) / 255.0, atol=0.02), "coronal must be flipped"
 
 
 def test_slot_dataset_downsamples_to_the_requested_size(tmp_path):
