@@ -2972,3 +2972,41 @@ slot and running it were indistinguishable. They became meaningful only once the
 given non-zero BatchNorm offsets, and then the bias-only test failed as it should.
 
 **246 tests pass** (238 before).
+
+### Submission A pushed; three more kernels built and dry-run while it scores (2026-09-13)
+
+**Submission A** went in as submission 56193964 from `knee-phase7-submit` version 1, against the
+unchanged `rsna-knee-src` (byte-for-byte the files the kernel was dry-run on). Its log before
+submitting: the src guard passed, 10 models loaded (c2 at 6 slots, c3 at 2), 4-5 slots filled per
+test study, **0 of 3 on the 0.5 fallback**. The new src is held back from `rsna-knee-src` until the
+score lands, so Kaggle's rerun on the hidden set sees the same code.
+
+**`phase7-prep9-shard0..3`** (CPU, launched): prep v2 re-run at 9 slice groups for averaging over
+slice windows at inference. Sized first: **1.80x prep v2 per study** on the local sample, so ~17 GB
+over the corpus and ~4.3 GB per shard. Nine centres over the band contain the five training centres,
+and locally that holds exactly: groups 0,2,4,6,8 of every 9-group artifact equal the 5-group artifact
+(max pixel difference 0), and the loader's 5-group read of a 9-group artifact equals its read of the
+phase6 artifact tensor for tensor. Each shard repeats the pixel comparison on 200 real studies against
+the mounted phase6 shard, in a last cell that runs after the manifests are written, so a failure there
+costs the check and not the shard.
+
+**`phase7-screen-v3`** (GPU, waiting on the src upload) ran both arms end to end locally.
+**`phase7-tta`** (GPU, waiting on prep9) ran end to end on mock checkpoints: every labelled study
+predicted at both reads, the reproduction gate and the report executing.
+
+**What those dry runs cannot show, so that nobody reads them as passed:**
+
+- **Every local series is a single DICOM file.** All 20. So every stored group is the same slice, the
+  9-group and 5-group reads are identical locally by construction, and whether the four in-between
+  groups add anatomy is only testable on the corpus. The TTA kernel therefore prints each member's
+  largest prediction change between reads and **asserts it is non-zero** -- a read that silently
+  returned the 5-group tensors would otherwise report "no gain" instead of failing.
+- A random-init backbone emits near-constant predictions (per-label spread ~4e-7), so equal AUCs
+  across reads in a local run carry no information either way.
+
+**A local failure that was not a code failure.** The 19-slot arm first looked hung, then exited 143
+with no traceback. The kernel log has the NVIDIA driver failing host allocations (`NV_ERR_NO_MEMORY`)
+and `earlyoom` sending SIGTERM to python once memory and swap were both under 10%: the dev box has
+7.1 GB RAM with ~500 MB available. At 112px, batch 1 and no loader workers the arm completes. Kaggle's
+T4 sessions are not bound by this, but a silent exit here should be checked against `earlyoom` before
+it is debugged as a hang.

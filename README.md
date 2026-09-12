@@ -328,6 +328,12 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         0.8805, at 43% of c2's GPU cost
   phase7-submit/       the two-config ensemble kernel: one prep pass, two loader shapes and
                         two architectures, probability mean over ten models
+  phase7-screen-v3/    nineteen slots against six under c2's config, both arms with absent
+                        slots packed out of the backbone, paired in one session
+  phase7-prep9-shard0..3/  prep v2 re-run at 9 slice groups, whose groups 0,2,4,6,8 are the
+                        five the confirm checkpoints trained on -- checked pixel for pixel
+  phase7-tta/          the c2 and c3 confirm checkpoints re-reading their own folds at 5 and
+                        9 groups: slice-window averaging measured without training anything
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
