@@ -52,7 +52,7 @@ rival that runs in 30 minutes would need 0.925 *at zero runtime*. (It is not hop
 model taking four hours scores worse than our submitted 0.835 at 68 minutes, because the track really
 does reward accuracy per second — but accuracy is the lever in both tracks.)
 
-**Phase 7 so far.** Four findings, each measured rather than assumed:
+**Phase 7 so far.** Six findings, each measured rather than assumed:
 
 | finding | evidence |
 |---|---|
@@ -60,6 +60,8 @@ does reward accuracy per second — but accuracy is the lever in both tracks.)
 | **DINOv2 was overfitting, not underfitting.** Phase 6 read "training loss still falling at epoch 8" as unfinished learning. At 16 epochs the loss falls *below* efficientnet's while both validation tiers drop | val −0.0075 [−0.0156, −0.0006], gold −0.0391 [−0.0701, −0.0045], both CIs excluding zero |
 | **Config diversity is fully additive to fold averaging.** c2+c3 over five folds each beats either member by the same margin the fold-0 screen measured over single-fold members | OOF +0.0156 [+0.0136, +0.0175]; gold 0.8919 vs 0.8794 |
 | **Absent slots were still run through the backbone.** The mask kept them out of pooling, but each fed a black image into BatchNorm's training statistics, and at 19 slots they would be 73% of backbone compute. Now packed out before the backbone; eval logits are unchanged for any study with a present slot, so the scored checkpoints are unaffected | equivalence tests on both heads; 19-slot load 1,243 → 120 ms/study |
+| **The recovered nineteen-slot table is a different model, not a better one.** Under c2's config it ties the six-slot table on fold 0, and averaging the two beats either | val 19 − 6: −0.0015 [−0.0080, +0.0044]; both averaged − 6: +0.0085 [+0.0049, +0.0118] |
+| **A third backbone family adds to the ensemble when it matches c2 alone, not when it trails it.** ConvNeXt-tiny equals c2 and adds to c2+c3; EVA02-small trails c2 by 0.045 and subtracts | f1 added to c2+c3: +0.0062 [+0.0040, +0.0086]; f2: −0.0023 [−0.0047, +0.0001] |
 
 **Prep v3** re-prepped all 4,407 studies into a nineteen-slot table (plane × fat-suppression ×
 {T1, PD, T2, UNK}) with 0 failures, mean 5.04 filled slots per study against a census prediction of
@@ -338,6 +340,8 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         five the confirm checkpoints trained on -- checked pixel for pixel
   phase7-tta/          the c2 and c3 confirm checkpoints re-reading their own folds at 5 and
                         9 groups: slice-window averaging measured without training anything
+  phase7-confirm-f1/   5-fold confirm of ConvNeXt-tiny, the third-member candidate, scored alone
+                        and added to c2's and c3's own pooled OOF
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)

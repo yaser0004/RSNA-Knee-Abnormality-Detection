@@ -3067,3 +3067,90 @@ reproduced the confirm.
 **Fix:** take the window from the five training groups' slices and apply it to all nine, so the
 shared groups are prep v2's pixels exactly and the in-between groups share their scale. The shards
 re-run on CPU.
+
+### v3 is not a better table but a different one; ConvNeXt earns a confirm, EVA02 does not (2026-09-13)
+
+Both screens ran fold 0 of `primary_v3`, target `steven_v4`, gold held out, on the packed model.
+
+**v3 screen** (`knee-phase7-screen-v3`, c2's config on each table, one session):
+
+| arm | val macro | gold | backbone images per batch | peak GPU | train min |
+|---|---|---|---|---|---|
+| 6 slots, prep v2 | 0.8586 | 0.8682 | 193.5 of 240 | 9.9 GB | 45.0 |
+| 19 slots, prep v3 | 0.8571 | 0.8767 | 200.9 of 760 | 13.1 GB | 91.9 |
+
+- **19 minus 6, val: -0.0015 [-0.0080, +0.0044]**, CI spanning zero. By the rule registered before the
+  run, **v3 is not worth confirming as a replacement.** Gold, +0.0085 [-0.0093, +0.0287], spans zero
+  too.
+- **Both tables averaged, minus 6: +0.0085 [+0.0049, +0.0118] val and +0.0148 [+0.0031, +0.0282]
+  gold**, both CIs excluding zero. Two c2 models that differ only in how series are filed decorrelate
+  enough to ensemble. The census finding was real; it pays as diversity rather than as a better
+  single model. Whether it still pays next to c3 and f1 is the next question, measured offline.
+- **Packing alone**, unpaired: 0.8586 packed against 0.8571 for the unpacked c2 confirm's fold 0,
+  +0.0015 inside ~0.0065 run-to-run noise. The eval-equivalence tests covered inference; this is the
+  first evidence that packing did not hurt training.
+- **Cost.** Packing held backbone work level (200.9 against 193.5 images per batch), yet the 19-slot
+  arm took **2.0x the wall time** and 3.2 GB more GPU memory. Not measured, but the likely cause is the
+  loader still building and shipping dense 19-slot batches -- 760 images, 14 of 19 slots zeros -- that
+  the model then discards. At this speed a 19-slot five-fold confirm costs ~7.7 h.
+
+**Family screen** (`knee-phase7-screen-family`, c2's six-slot config, fold 0):
+
+| arm | val macro | gold | peak GPU | train min |
+|---|---|---|---|---|
+| f1 ConvNeXt-tiny, c2's recipe | 0.8588 | 0.8735 | 4.2 GB | 70.4 |
+| f2 EVA02-small, c3's recipe | 0.8122 | 0.8228 | 2.8 GB | 80.7 |
+
+Judged against the confirm runs' own fold-0 predictions (val: c2 0.8571, c3 0.8552, c2+c3 0.8705;
+gold: 0.8699, 0.8600, 0.8835):
+
+- **f1 added to c2+c3: +0.0062 [+0.0040, +0.0086] val**, probability mean, CI excluding zero, so
+  **worth confirming.** Rank mean +0.0046 [+0.0023, +0.0072]; gold +0.0073 [-0.0004, +0.0154]. Alone
+  it equals c2 (+0.0017 [-0.0059, +0.0096]) -- a new family adding as much as c3 did, not a better model.
+- **f2 is 0.045 worse than c2 alone** (val -0.0449 [-0.0543, -0.0357], gold -0.0471 [-0.0848, -0.0139])
+  and subtracts from the ensemble (-0.0023 probability mean, -0.0060 rank mean). On top of f1 it costs
+  -0.0033 [-0.0050, -0.0017]. **Not confirmed.** `mim_in22k` is a masked-image-modelling checkpoint
+  with no supervised fine-tune, and c3's learning rates were chosen for DINOv2; nothing here separates
+  "EVA02 fails at this task" from "EVA02 fails at this recipe". Not pursued, because the diversity it
+  was meant to add is already bought by f1.
+- Probability mean beat rank mean for f1 as well (+0.0062 against +0.0046), across families -- the
+  Phase 6 finding held where it was least expected to.
+
+**The 336px arm does not fit c2's model at batch 8.** Peak memory was 9.9 GB at 224; activations scale
+with pixel count, 2.25x at 336, which estimates ~22 GB against a T4's 15. EfficientNet has BatchNorm,
+so gradient checkpointing is not exact there. Step 5 needs a batch-size or accumulation decision
+before it is built.
+
+**prep9, second run: all four shards pass.** Groups 0,2,4,6,8 against prep v2 over 200 studies per
+shard: **mean |diff| 0.0000, max 0**, on every shard; 0 slot differences; 4.16-4.19 GB per shard.
+`knee-phase7-tta` pushed.
+
+### The 19-slot model's ensemble value is model count, not table diversity (2026-09-13)
+
+Fold-0 marginal gains, computed offline from the confirm runs' own fold-0 predictions and both screens'
+arrays, with rows and labels checked identical across all five sources (863 val, 58 gold):
+
+| ensemble | val macro | gold macro |
+|---|---|---|
+| c2+c3 | 0.8705 | 0.8835 |
+| c2+c3+f1 | 0.8767 | 0.8908 |
+| c2+c3+v19 | 0.8744 | 0.8879 |
+| c2+c3+f1+v19 | 0.8781 | 0.8928 |
+
+| added | val | gold |
+|---|---|---|
+| v19 to c2+c3 | +0.0038 [+0.0017, +0.0060] | +0.0044 [-0.0046, +0.0142] |
+| v19 to c2+c3+f1 | +0.0014 [-0.0003, +0.0030] | +0.0020 [-0.0055, +0.0101] |
+| v19 to c2+c3+f1, rank mean | -0.0001 [-0.0020, +0.0017] | +0.0027 [-0.0054, +0.0116] |
+| **v6, the packed six-slot arm, to c2+c3+f1** | **+0.0015 [-0.0001, +0.0030]** | +0.0017 [-0.0060, +0.0098] |
+
+**The control row decides it.** Next to c2+c3+f1, the 19-slot model adds what a second six-slot c2
+model from a different session adds. Whatever the recovered table contributes as diversity, f1
+already covers; what remains is the generic gain from averaging one more model. **So v3 gets no
+five-fold confirm** -- ~7.7 h at its current loader speed, for a gain a model of a known config
+matches. The census finding stands as a fact about the data; it did not become a better model, and
+next to f1 it did not become a more diverse one either.
+
+**What the control row also prices:** a fourth model of any decent config is worth about +0.0015 on
+this fold. That is the bar a later member has to clear to justify its own confirm, and it is also a
+cheap option in its own right -- more seeds of confirmed configs buy it without a new screen.
