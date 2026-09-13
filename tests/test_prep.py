@@ -59,6 +59,24 @@ def test_normalize_series_handles_empty_list():
     assert normalize_series([]) == []
 
 
+def test_normalize_series_can_take_its_window_from_a_subset_of_the_slices():
+    # A 9-group prep must scale its five shared groups exactly as the 5-group
+    # artifact did, so the window has to come from those groups rather than
+    # from every slice handed in -- extra slices move the 1st/99th percentiles.
+    rng = np.random.default_rng(0)
+    shared = [rng.uniform(0, 1000, (4, 4)).astype(np.float32) for _ in range(3)]
+    extra = [rng.uniform(0, 3000, (4, 4)).astype(np.float32) for _ in range(2)]
+
+    alone = normalize_series(shared)
+    windowed = normalize_series(shared + extra, window_slices=shared)
+    pooled = normalize_series(shared + extra)
+
+    assert len(windowed) == 5
+    assert all(np.array_equal(a, w) for a, w in zip(alone, windowed))
+    assert not all(np.array_equal(a, p) for a, p in zip(alone, pooled)), (
+        "extra slices should move an unwindowed scale, or this test proves nothing")
+
+
 def test_normalize_series_handles_constant_series_without_dividing_by_zero():
     slices = [np.full((2, 2), 500.0, dtype=np.float32) for _ in range(3)]
 
@@ -663,6 +681,48 @@ class TestStudyWeightings:
         study_weightings(study_dir, series)
 
         assert len(calls) == len([s for s in series if any((study_dir / s).glob("*.dcm"))])
+
+
+@pytest.mark.skipif(not _HAS_REAL_STUDY, reason="needs the sample DICOMs")
+class TestPrepSlotsWindowGroups:
+    """A 9-group prep for slice-window averaging has to contain the 5-group
+    artifact the checkpoints trained on. Nine centres over the band contain the
+    five, but the intensity window is taken from the slices prep selects, so
+    without `window_groups` the shared groups come out rescaled -- measured on
+    the corpus at a mean 1.2 grey levels, max 67. The test study's series are
+    real 30-109 slice stacks, which the single-slice training sample is not."""
+
+    def _args(self):
+        return _real_study_uid(), _TEST_SERIES_DIR, pd.read_csv(_TEST_SERIES_CSV)
+
+    def test_nine_groups_windowed_on_five_contain_the_five_group_artifact(self):
+        uid, root, series_df = self._args()
+        five, _ = prep_slots(uid, root, series_df, n_groups=5, out_size=32)
+        nine, meta = prep_slots(uid, root, series_df, n_groups=9, window_groups=5, out_size=32)
+        unwindowed, _ = prep_slots(uid, root, series_df, n_groups=9, out_size=32)
+
+        assert set(nine) == set(five)
+        rescaled = 0
+        for name, slices in five.items():
+            expected = np.stack(slices)
+            windowed = np.stack(nine[name]).reshape(9, SLICE_GROUP, 32, 32)[0::2]
+            assert np.array_equal(windowed.reshape(expected.shape), expected), name
+            plain = np.stack(unwindowed[name]).reshape(9, SLICE_GROUP, 32, 32)[0::2]
+            rescaled += not np.array_equal(plain.reshape(expected.shape), expected)
+        assert rescaled, "no series changed scale without the window, so this proves nothing"
+        assert {sm["window_groups"] for sm in meta["series"].values()} == {5}
+
+    def test_the_default_keeps_the_window_on_the_selected_slices(self):
+        uid, root, series_df = self._args()
+        _, meta = prep_slots(uid, root, series_df, n_groups=5, out_size=32)
+        assert {sm["window_groups"] for sm in meta["series"].values()} == {None}
+
+    def test_window_groups_other_than_the_contained_subset_are_rejected(self):
+        # only n_groups == 2 * window_groups - 1 guarantees every window slice is
+        # among the selected ones; anything else would need slices never decoded
+        uid, root, series_df = self._args()
+        with pytest.raises(ValueError):
+            prep_slots(uid, root, series_df, n_groups=8, window_groups=5, out_size=32)
 
 
 @pytest.mark.skipif(not _HAS_REAL_STUDY, reason="needs the sample DICOMs")

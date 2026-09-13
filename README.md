@@ -25,12 +25,14 @@ labels improved, and submitted from `notebooks/phase5-submit/` — scored **0.83
 a presence mask, 3-slice groups), report-hash folds v3, a public label target, and a per-diagnosis
 slot-attention head, confirmed on five folds (pooled OOF 0.8485, gold transfer **0.8794** against
 Phase 5's 0.8189) and submitted from `notebooks/phase6-submit/` — scored **0.905**, up from 0.835,
-inside its pre-registered band; **Phase 7 in progress** — the recovered slot table (prep v3) is
-built and the corpus re-prepped, c3 is confirmed on five folds, and the two-config ensemble measures
-**+0.0156 [+0.0136, +0.0175]** pooled OOF over the submitted model — see below.**
+inside its pre-registered band; **Phase 7 in progress** — c3 is confirmed on five folds, and the
+two-config ensemble (pooled OOF **+0.0156 [+0.0136, +0.0175]** over c2 alone) was submitted from
+`notebooks/phase7-submit/` and scored **0.916**, up from 0.905 and inside its pre-registered band;
+the recovered slot table (prep v3) is built and being screened — see below.**
 
-**Where we actually stand, and what Phase 7 aims at.** As of 2026-09-12 the field is 3,620 teams:
-1st 0.955, median **0.909**, and our 0.905 now sits **below** the median at rank ~1855. The top is
+**Where we actually stand, and what Phase 7 aims at.** As of 2026-09-12 the field was 3,620 teams:
+1st 0.955, median **0.909**, and our 0.905 sat **below** the median at rank ~1855; on 2026-09-13
+Submission A's **0.916** ranks **1,671 of 3,638**, above it. The top is
 not a smooth shelf but **spikes of identical scores** — 379 teams at exactly 0.936, 140 at 0.940,
 264 at 0.941 — each a public fitted-weights notebook forked hundreds of times. Ties go to the earlier
 submission, so reaching a spike's score lands behind all of it: 0.936 is rank 1,139, **0.937 is rank

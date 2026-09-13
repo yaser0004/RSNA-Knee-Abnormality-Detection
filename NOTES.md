@@ -3025,3 +3025,45 @@ and `earlyoom` sending SIGTERM to python once memory and swap were both under 10
 7.1 GB RAM with ~500 MB available. At 112px, batch 1 and no loader workers the arm completes. Kaggle's
 T4 sessions are not bound by this, but a silent exit here should be checked against `earlyoom` before
 it is debugged as a hang.
+
+### Submission A scored 0.916, inside its band -- and the 9-group prep failed its own gate (2026-09-13)
+
+**0.916** (submission 56193964), up from 0.905. **Rank 1,671 of 3,638**; 0.905 would rank ~1,882
+today. Median 0.909.
+
+It landed in the pre-registered **expected** row (0.913-0.925). The config ensemble's gain
+transferred at roughly the measured size: **+0.011 on the LB** against +0.0125 gold and +0.0156
+pooled OOF. The gold -> LB offset is **+0.024** (0.8919 -> 0.916), the fourth pair after +0.038,
++0.016, +0.026. The drift caveat recorded before scoring did not bite -- the score is above the
+0.905-0.912 row where the gain and LB drift could not have been told apart.
+
+What it is not: still 0.020 below the 0.936 spike, which ranks 1,156 behind its ties today.
+
+**All four `phase7-prep9` shards failed their last cell -- the gate doing its job.** Every shard
+prepped every study (4,407, 0 failures), filed every study into the same slots as prep v2
+(0 differences), and landed at the predicted size (4.16-4.19 GB per shard against ~4.3 estimated).
+Then groups 0,2,4,6,8 were compared against the phase6 artifacts over 200 studies per shard:
+
+| shard | mean \|diff\| | max \|diff\| |
+|---|---|---|
+| 0 | 1.17 | 67 |
+| 1 | 1.18 | 40 |
+| 2 | 1.12 | 48 |
+| 3 | 1.24 | 56 |
+
+against a threshold of 0.5 grey levels.
+
+**Cause:** `normalize_series` clips each series to the 1st/99th percentile of *the slices prep
+selected* (prep.py:33). Nine groups select 27 slices instead of 15, so the window moves and every
+stored pixel moves with it, including those in the five shared groups. The superset property holds
+for *which* slices are stored; it does not hold for *how they are scaled*.
+
+**Why the local dry run showed a max difference of exactly 0:** every local series is one slice, so
+15 and 27 selected slices are the same image repeated and the percentile window cannot move. The
+property that made the in-between groups untestable locally made this untestable too. The gate ran
+on real stacks and caught it before any GPU time was spent on TTA predictions that could not have
+reproduced the confirm.
+
+**Fix:** take the window from the five training groups' slices and apply it to all nine, so the
+shared groups are prep v2's pixels exactly and the in-between groups share their scale. The shards
+re-run on CPU.

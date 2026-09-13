@@ -30,7 +30,8 @@ from knee.dicom import (
 # execution risk applies to untrusted input, which this isn't.
 
 
-def normalize_series(raw_slices: list[np.ndarray]) -> list[np.ndarray]:
+def normalize_series(raw_slices: list[np.ndarray],
+                     window_slices: list[np.ndarray] | None = None) -> list[np.ndarray]:
     """Robust percentile clip (1st/99th), computed once across all the slices
     handed in rather than per slice -- this is the per-series upgrade
     decode_and_normalize's docstring calls for: a shared scale keeps relative
@@ -39,10 +40,16 @@ def normalize_series(raw_slices: list[np.ndarray]) -> list[np.ndarray]:
 
     prep_study passes the K slices it selected, not the full series, so the
     scale describes exactly the pixels that get stored (and costs one decode
-    pass, not two)."""
+    pass, not two).
+
+    `window_slices` takes the percentiles from other slices than the ones being
+    scaled. prep_slots uses it so a 9-group read scales its five shared groups
+    exactly as the 5-group artifact did: the window depends on which slices were
+    selected, and four extra groups move it."""
     if not raw_slices:
         return []
-    stacked = np.concatenate([s.ravel() for s in raw_slices])
+    source = raw_slices if window_slices is None else window_slices
+    stacked = np.concatenate([s.ravel() for s in source])
     lo, hi = np.percentile(stacked, [1, 99])
     return [percentile_clip_to_uint8(s, lo, hi) for s in raw_slices]
 
@@ -242,6 +249,7 @@ def prep_slots(
     out_size: int = CROP_PX,
     is_gold: bool = False,
     slot_scheme: str = "v2",
+    window_groups: int | None = None,
 ) -> tuple[dict[str, list[np.ndarray]], dict]:
     """Phase 6 prep: one study to slot-keyed, physically-scaled pixels.
 
@@ -277,7 +285,18 @@ def prep_slots(
 
     Only the *filing* changes between schemes: cropping, ordering, normalization
     and grouping are shared, so a 19-vs-6 screen cannot be confounded by a
-    silent pixel change."""
+    silent pixel change.
+
+    `window_groups` takes each series' intensity window from the slices of that
+    many groups instead of from every selected slice. It exists for slice-window
+    averaging: prepped at n_groups=9 with window_groups=5, groups 0,2,4,6,8 are
+    the 5-group artifact exactly. Without it the four extra groups move the
+    1st/99th percentiles and rescale the shared ones -- a mean 1.2 grey levels,
+    max 67, over the corpus. Only n_groups == 2 * window_groups - 1 is accepted:
+    it is the one relation under which every window slice is a selected slice."""
+    if window_groups is not None and n_groups != 2 * window_groups - 1:
+        raise ValueError(f"window_groups={window_groups} needs n_groups={2 * window_groups - 1}, "
+                         f"got {n_groups}")
     dcm_root = Path(dcm_root)
     study_dir = dcm_root / study_uid
 
@@ -314,7 +333,8 @@ def prep_slots(
             skipped_slots[slot_name] = "no PixelSpacing"
             continue
 
-        groups = select_slice_groups(order_slices(headers), n_groups)
+        ordered = order_slices(headers)
+        groups = select_slice_groups(ordered, n_groups)
         selected = [header for group in groups for header in group]
         raw_slices, kept_headers = _decode_selected(selected, series_uid, decode_failures)
         if len(raw_slices) != len(selected):
@@ -323,10 +343,18 @@ def prep_slots(
             skipped_slots[slot_name] = "a slice group failed to decode"
             continue
 
+        window = None
+        if window_groups is not None:
+            # both selections index the same header objects, so the window's
+            # slices are looked up among those already decoded, not read twice
+            decoded = {id(header): raw for header, raw in zip(selected, raw_slices)}
+            window = [decoded[id(header)]
+                      for group in select_slice_groups(ordered, window_groups) for header in group]
+
         spacing = kept_headers[0]["PixelSpacing"]
         slot_slices[slot_name] = [
             crop_to_mm(s, spacing, crop_mm=crop_mm, out_size=out_size)
-            for s in normalize_series(raw_slices)
+            for s in normalize_series(raw_slices, window_slices=window)
         ]
 
         first = kept_headers[0]
@@ -337,6 +365,7 @@ def prep_slots(
             "n_slices_stored": len(slot_slices[slot_name]),
             "n_groups": n_groups,
             "group_size": len(groups[0]),
+            "window_groups": window_groups,
             "crop_mm": crop_mm,
             "mm_per_px": crop_mm / out_size,
             "Rows": first["Rows"],
