@@ -322,6 +322,75 @@ def test_train_one_epoch_scaler_path_matches_the_plain_path():
     assert run(True) == pytest.approx(run(False), rel=1e-6)
 
 
+# --- Phase 7: gradient accumulation, for arms that do not fit at batch 8 ---------
+
+
+class _NoBatchNormModel(torch.nn.Module):
+    """A linear head on each study's mean colour: no BatchNorm, so a batch of 8
+    and two accumulated batches of 4 must produce the same update exactly --
+    with BatchNorm the batch statistics would differ and the test could not tell
+    a scaling bug from a normalisation difference."""
+
+    def __init__(self):
+        super().__init__()
+        self.head = torch.nn.Linear(3, len(LABEL_COLUMNS))
+
+    def forward(self, x, mask=None):
+        return self.head(x.mean(dim=(1, 3, 4)))
+
+
+@pytest.mark.parametrize("use_scaler", [False, True])
+def test_accumulating_two_batches_of_four_updates_like_one_batch_of_eight(use_scaler):
+    # every study has exactly one non-NaN label, so equal-sized batches hold equal
+    # numbers of valid targets and the mean of the two batch means is the mean
+    def weights_after(batch_size, accumulation_steps):
+        torch.manual_seed(0)
+        model = _NoBatchNormModel()
+        loader = torch.utils.data.DataLoader(_TinySyntheticDataset(n_studies=8, size=8),
+                                             batch_size=batch_size)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.5)
+        scaler = torch.amp.GradScaler("cpu", enabled=False) if use_scaler else None
+        train_one_epoch(model, loader, optimizer, device="cpu", scaler=scaler,
+                        accumulation_steps=accumulation_steps)
+        return model.head.weight.detach().clone()
+
+    assert torch.allclose(weights_after(4, 2), weights_after(8, 1), atol=1e-6)
+    assert not torch.allclose(weights_after(4, 1), weights_after(8, 1), atol=1e-6), (
+        "two unaccumulated steps should differ from one big one, or this test proves nothing")
+
+
+def test_accumulation_steps_once_per_group_and_steps_a_trailing_partial_group():
+    # 6 studies at batch 2 is 3 batches; grouped in twos that is one full group
+    # and one partial one, and the partial one must still step -- otherwise its
+    # gradient would leak into the next epoch's first update
+    torch.manual_seed(0)
+    model = _NoBatchNormModel()
+    loader = torch.utils.data.DataLoader(_TinySyntheticDataset(n_studies=6, size=8), batch_size=2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    optimizer_steps, scheduler_steps = [], []
+    real_step = optimizer.step
+    optimizer.step = lambda *a, **k: (optimizer_steps.append(1), real_step(*a, **k))[1]
+
+    class _RecordingScheduler:
+        def step(self):
+            scheduler_steps.append(1)
+
+    train_one_epoch(model, loader, optimizer, device="cpu", scheduler=_RecordingScheduler(),
+                    accumulation_steps=2)
+
+    assert len(optimizer_steps) == 2 and len(scheduler_steps) == 2
+    assert all(p.grad is None or not p.grad.abs().sum() for p in model.parameters()), (
+        "gradients left behind after the epoch would leak into the next one")
+
+
+def test_accumulation_steps_below_one_are_rejected():
+    model = _NoBatchNormModel()
+    loader = torch.utils.data.DataLoader(_TinySyntheticDataset(n_studies=2, size=8), batch_size=2)
+    with pytest.raises(ValueError):
+        train_one_epoch(model, loader, torch.optim.SGD(model.parameters(), lr=0.1),
+                        device="cpu", accumulation_steps=0)
+
+
 # --- Phase 6 Step 2: report-hash grouped folds ---------------------------------
 
 

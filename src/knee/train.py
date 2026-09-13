@@ -257,8 +257,20 @@ def _unpack_batch(batch):
     return images, None, labels, None
 
 
+def _optimizer_step(optimizer, scaler, scheduler) -> None:
+    """One update from the gradients accumulated so far, then clear them."""
+    if scaler is None:
+        optimizer.step()
+    else:
+        scaler.step(optimizer)
+        scaler.update()
+    optimizer.zero_grad()
+    if scheduler is not None:
+        scheduler.step()
+
+
 def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
-                    scaler=None, scheduler=None) -> float:
+                    scaler=None, scheduler=None, accumulation_steps: int = 1) -> float:
     """One training epoch. A batch where every label is NaN for every study in
     it (masked_bce_loss's ValueError) is skipped rather than crashing the run
     -- possible with a small batch size and a low-coverage lexical label.
@@ -274,11 +286,24 @@ def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
     rate stranded near its floor.
 
     A skipped all-NaN batch steps neither the optimizer nor the scheduler --
-    there was no update to schedule."""
+    there was no update to schedule.
+
+    `accumulation_steps` sums gradients over that many batches before each
+    optimizer step, for configs whose batch does not fit in memory: batch 4
+    accumulated twice updates like batch 8. Each batch's loss is divided by it,
+    so for a model without BatchNorm equal-sized batches reproduce the large
+    batch's step exactly; BatchNorm still normalises over the smaller batch.
+    The scheduler steps once per optimizer step, so OneCycle must be built with
+    ceil(len(loader) / accumulation_steps) steps per epoch. A partial group at
+    the end of the epoch still steps rather than leaking into the next epoch."""
+    if accumulation_steps < 1:
+        raise ValueError(f"accumulation_steps must be at least 1, got {accumulation_steps}")
     model.train()
     total_loss = 0.0
     n_batches = 0
+    pending = 0
     autocast_device = "cuda" if str(device).startswith("cuda") else "cpu"
+    optimizer.zero_grad()
 
     for batch in loader:
         images, mask, labels, weights = _unpack_batch(batch)
@@ -286,7 +311,6 @@ def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
         labels = labels.to(device)
         mask = mask.to(device) if mask is not None else None
         weights = weights.to(device) if weights is not None else None
-        optimizer.zero_grad()
 
         if scaler is None:
             logits = model(images, mask=mask)
@@ -294,8 +318,7 @@ def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
                 loss = masked_bce_loss(logits, labels, weights)
             except ValueError:
                 continue
-            loss.backward()
-            optimizer.step()
+            (loss / accumulation_steps).backward()
         else:
             with torch.autocast(autocast_device, enabled=scaler.is_enabled()):
                 logits = model(images, mask=mask)
@@ -305,15 +328,17 @@ def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
                     continue
             # BCE-with-logits under fp16 can underflow the backward pass; the
             # scaler is what keeps those gradients representable.
-            scaler.scale(loss).backward()
-            scaler.step(optimizer)
-            scaler.update()
+            scaler.scale(loss / accumulation_steps).backward()
 
-        if scheduler is not None:
-            scheduler.step()
         total_loss += loss.item()
         n_batches += 1
+        pending += 1
+        if pending == accumulation_steps:
+            _optimizer_step(optimizer, scaler, scheduler)
+            pending = 0
 
+    if pending:
+        _optimizer_step(optimizer, scaler, scheduler)
     if n_batches == 0:
         raise ValueError("no batch in this epoch had a non-NaN label")
     return total_loss / n_batches
