@@ -342,6 +342,9 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         9 groups: slice-window averaging measured without training anything
   phase7-confirm-f1/   5-fold confirm of ConvNeXt-tiny, the third-member candidate, scored alone
                         and added to c2's and c3's own pooled OOF
+  phase7-screen-res/   336px (batch 4 x 2 accumulated) and confidence weights on c2's config,
+                        each arm paired with a control that differs in one thing and scored as a
+                        fourth member next to c2+c3+f1
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
