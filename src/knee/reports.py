@@ -1,6 +1,7 @@
 import hashlib
 import math
 import re
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -371,3 +372,67 @@ def confidence_from_agreement(
         w = np.clip(1.0 - 2.0 * spread, floor, 1.0)
         weights[label] = w / w.mean()
     return weights
+
+
+def fold_confidence(source: pd.DataFrame, labels: list[str]) -> pd.DataFrame:
+    """Turn a hard label with a `<label>__conf` column into a graded score: a 1
+    held at confidence c scores c, a 0 held at c scores 1 - c. Two public sources
+    ship in that form, and since AUC reads order the confidence is the part that
+    carries the ranking. A label with no confidence column passes through; a
+    missing confidence counts as a coin flip. Values are coerced to numbers, so a
+    stray string becomes NaN rather than a crash."""
+    graded = pd.DataFrame(index=source.index)
+    for label in labels:
+        value = pd.to_numeric(source[label], errors="coerce")
+        conf_col = f"{label}__conf"
+        if conf_col in source.columns:
+            conf = pd.to_numeric(source[conf_col], errors="coerce").clip(0, 1).fillna(0.5)
+            value = value * conf + (1 - value) * (1 - conf)
+        graded[label] = value
+    return graded
+
+
+def _union_index(frames: list[pd.DataFrame]) -> pd.Index:
+    index = frames[0].index
+    for frame in frames[1:]:
+        index = index.union(frame.index)
+    return index
+
+
+def _label_column(frame: pd.DataFrame, index: pd.Index, label: str) -> np.ndarray:
+    if label not in frame.columns:
+        return np.full(len(index), np.nan)
+    return pd.to_numeric(frame.reindex(index)[label], errors="coerce").to_numpy(float)
+
+
+def multi_source_labels(sources: dict[str, pd.DataFrame], labels: list[str]) -> pd.DataFrame:
+    """One wide training frame with a column per (source, label), named
+    "{source}:{label}" and laid out source-major, over the union of the sources'
+    studies.
+
+    This is the multi-source target without the rank blend's defect (NOTES
+    2026-09-07): every source keeps its own prevalence in its own columns, the
+    model grows to 12 x K logits, and masked BCE skips the NaN where a source
+    never rated a study. knee.infer.average_source_heads folds the K readings
+    back to twelve at inference."""
+    index = _union_index(list(sources.values()))
+    wide = pd.DataFrame(index=index)
+    for name, frame in sources.items():
+        for label in labels:
+            wide[f"{name}:{label}"] = _label_column(frame, index, label)
+    return wide
+
+
+def blend_sources(sources: list[pd.DataFrame], labels: list[str]) -> pd.DataFrame:
+    """Per-label mean of the sources' graded scores, over whichever sources rated
+    each study. Unlike the rank blend a probability mean keeps every label's
+    prevalence, which is what makes it usable as a training target."""
+    index = _union_index(sources)
+    blend = pd.DataFrame(index=index)
+    for label in labels:
+        stack = np.vstack([_label_column(frame, index, label) for frame in sources])
+        with warnings.catch_warnings():
+            # a study no source rated is NaN by design, not a warning
+            warnings.simplefilter("ignore", RuntimeWarning)
+            blend[label] = np.nanmean(stack, axis=0)
+    return blend

@@ -3350,3 +3350,55 @@ promotes only on a paired pooled-OOF CI.
 runtime stays logged for the record); the 58 gold studies may enter training for the final aggressive
 pick only, after every screening decision is closed; free compute only, with Colab free as a third lane
 for fold-0 screens. **Phase 8 plan:** `ai/plans/2026-09-19-phase8-win-plan.md` (supersedes Phase 7's).
+
+### Phase 8 opens: the s2 read and Submission C are built, the quota is not there yet (2026-09-19)
+
+**GPU lane A is blocked until the weekly reset.** `kaggle kernels push` for `knee-phase8-tta-s2`
+was refused with "Maximum weekly GPU quota of 30.00 hours reached" -- the 8.6 h s2 confirm took the
+rest of this week's hours. The last reset was observed on 2026-09-13, so the read runs on the reset
+and Submission C follows it; sequencing only, nothing in the plan changes.
+
+**Both Step 1 kernels are built and dry-run.**
+
+- `knee-phase8-tta-s2` is the Phase 7 TTA notebook with the member swapped for s2 and the read size
+  raised to 336 (the stored size, so no resize). Dry run on the 20-study sample with the real five
+  checkpoints and mock OOF files, at 112px / batch 1: every cell ran, both reads wrote their arrays.
+  As with every TTA dry run, the reproduction and change gates were patched out locally -- single-slice
+  series make the two reads identical by construction -- and are checked on the corpus.
+- `knee-phase8-submit-c` is Submission B's kernel plus a fourth `MEMBERS` entry (s2, six slots,
+  read=336, groups=9). Dry run with all twenty real checkpoints on the sample's test set: 20 models
+  loaded, one multi-slice study prepped and predicted, the two studies without local DICOMs fell back
+  to 0.5, header and probability checks passed. It had to run on CPU -- another process holds 2.6 GB
+  of the local 4 GB GPU -- where the forward took 50 s/study for twenty models; Kaggle's T4 ran B's
+  fifteen at 6.0 s/study all-in, so C should land near 10 s/study, ~3.7 h over the hidden set,
+  inside the 6 h budget the plan sets.
+
+**The offline scorer reproduces Submission B exactly** from the saved 9-group arrays: pooled OOF
+0.8713, gold 0.9059 (`ai/scratch/phase8-submit/score_members.py`). It takes s2's arrays the moment
+the read lands.
+
+**Step 2 landed, test-first, 280 tests (254 before):**
+
+- `head="group_attention"`: per-diagnosis attention over every (slot, group) token instead of the
+  mean over a slot's groups. The 9-group reads gained +0.005 to +0.009 with nothing retrained, so the
+  windows carry signal the mean discards; this head lets each label weigh the window that shows its
+  finding. No positional embedding yet -- a token does not know its depth -- by choice, so the screen
+  measures the MIL change alone. slot_attention's eval logits are untouched (the equivalence tests
+  that protect the scored checkpoints still pass).
+- Random group subsampling when augmenting: a 5-group training read of a 9-group artifact draws a
+  random sorted subset of the windows; eval keeps the fixed spread, so 5-of-9 still reproduces the
+  confirm (pinned by a test).
+- `ModelEma` (decay 0.999), updated once per optimizer step, never per batch, so accumulation does
+  not change its window.
+- The multi-source target needs no model change: `multi_source_labels` builds a wide frame,
+  "{source}:{label}", the loader takes `label_columns`, `KneeModel(num_labels=12 * K)` and masked
+  BCE skip the NaN where a source never rated a study, and `average_source_heads` folds the K
+  readings back to twelve. `blend_sources` is the probability-mean target and `fold_confidence` the
+  shared hard-label-plus-confidence mapping that the kernels and the gold arm each had a private copy of.
+
+**Per-label blend weights buy nothing at three members (bet 5, measured).** `fit_weights.py`
+fits non-negative per-label member weights by coordinate ascent on four folds and scores the fifth,
+rotated: c2+c3+f1 at 9 groups, CV-weighted blend against the plain mean, **+0.0000 [-0.0007,
++0.0007]**. The full-fit weights move (Contusion would go 0.92 to c3, Synovitis 0.55 to c2) but the
+gain does not survive the fold rotation. The plain probability mean stays; the script re-runs each
+time a member is added, and only a CV delta whose CI excludes zero would change the blend.

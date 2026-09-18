@@ -16,7 +16,7 @@ from knee.dataset import (
 )
 from knee.dicom import SLICE_GROUP, SLOTS, SLOTS_V3
 from knee.infer import LABEL_COLUMNS, build_submission
-from knee.prep import save_study_npz
+from knee.prep import load_study_npz, save_study_npz
 
 _SAMPLE_ROOT = Path(__file__).resolve().parents[1] / "data" / "sample"
 _TEST_SERIES_DIR = _SAMPLE_ROOT / "test_series"
@@ -601,3 +601,89 @@ class TestSlotDatasetSampleWeights:
             n_groups=2, out_size=8)[0]
 
         assert torch.allclose(w, torch.ones_like(w))
+
+
+# --- Phase 8: random group subsampling as train-time augmentation ------------------
+
+
+def _group_ids(slices):
+    # _slot_artifact values slice j of its first filled slot as j, so a stored
+    # triple's first pixel names its group
+    return [int(s[0, 0]) // SLICE_GROUP for s in slices[::SLICE_GROUP]]
+
+
+def _nine_group_stack(tmp_path):
+    uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",), n_groups=9)
+    stored, _ = load_study_npz(tmp_path / f"{uid}.npz", order=["SAG_FLUID"])
+    return uid, stored["SAG_FLUID"]
+
+
+def test_select_groups_keeps_the_fixed_spread_when_not_augmenting(tmp_path):
+    # the eval read must stay deterministic: 5-of-9 reproducing the 5-group
+    # confirm is the gate every 9-group number rests on
+    uid, slices = _nine_group_stack(tmp_path)
+    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8)
+    torch.manual_seed(0)
+
+    assert _group_ids(ds._select_groups(slices)) == [0, 2, 4, 6, 8]
+
+
+def test_select_groups_draws_a_random_sorted_subset_when_augmenting(tmp_path):
+    # the confirm checkpoints only ever saw groups 0,2,4,6,8 of the 9-group
+    # artifact; a training read that varies the windows shows the model the
+    # in-between anatomy a fixed read never does
+    uid, slices = _nine_group_stack(tmp_path)
+    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True)
+
+    draws = set()
+    for seed in range(20):
+        torch.manual_seed(seed)
+        ids = _group_ids(ds._select_groups(slices))
+        assert len(ids) == 5 and ids == sorted(ids) and len(set(ids)) == 5
+        assert set(ids) <= set(range(9))
+        draws.add(tuple(ids))
+    assert len(draws) > 1, "augmenting never varied the groups"
+
+
+def test_select_groups_takes_every_stored_group_when_none_are_spare(tmp_path):
+    uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",), n_groups=5)
+    stored, _ = load_study_npz(tmp_path / f"{uid}.npz", order=["SAG_FLUID"])
+    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True)
+
+    assert _group_ids(ds._select_groups(stored["SAG_FLUID"])) == [0, 1, 2, 3, 4]
+
+
+def test_slot_dataset_augmented_read_of_a_nine_group_artifact_has_the_training_shape(tmp_path):
+    uid, _ = _nine_group_stack(tmp_path)
+
+    image, _, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True)[0]
+
+    assert tuple(image.shape) == (len(SLOTS), 5, SLICE_GROUP, 8, 8)
+
+
+# --- Phase 8: a label frame wider than the twelve competition columns ---------------
+
+
+def test_slot_dataset_reads_the_label_columns_it_is_given(tmp_path):
+    # the multi-source target is a wide frame, "{source}:{label}", so the loader
+    # cannot assume the twelve competition columns
+    uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",))
+    columns = [f"{source}:{label}" for source in ("a", "b") for label in LABEL_COLUMNS]
+    labels_df = pd.DataFrame([[uid] + list(range(24))], columns=["StudyInstanceUID"] + columns)
+
+    _, _, labels, _ = PreppedSlotDataset([uid], tmp_path, labels_df=labels_df, n_groups=2,
+                                         out_size=8, label_columns=columns)[0]
+
+    assert labels.tolist() == [float(i) for i in range(24)]
+
+
+def test_slot_dataset_wide_labels_are_nan_for_a_study_missing_from_the_frame(tmp_path):
+    uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",))
+    columns = [f"a:{label}" for label in LABEL_COLUMNS]
+    labels_df = pd.DataFrame([["other-study"] + [1.0] * 12], columns=["StudyInstanceUID"] + columns)
+
+    _, _, labels, _ = PreppedSlotDataset([uid], tmp_path, labels_df=labels_df, n_groups=2,
+                                         out_size=8, label_columns=columns)[0]
+
+    assert labels.shape == (12,)
+    assert torch.isnan(labels).all()

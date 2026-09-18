@@ -273,3 +273,71 @@ def test_backbone_kwargs_reach_timm():
 
     assert logits.shape == (1, 12)
     assert model.backbone.num_features == 384
+
+
+# --- Phase 8: per-diagnosis attention over (slot, group) tokens -------------------
+
+
+def _group_attn_model():
+    return KneeModel(backbone_name="efficientnet_b0", num_labels=12, pretrained=False,
+                     head="group_attention")
+
+
+def test_group_attention_returns_logits_for_all_labels():
+    model = _group_attn_model()
+    logits = model(torch.randn(2, 3, 2, 3, SIZE, SIZE),
+                   mask=torch.tensor([[True, True, False], [True, False, False]]))
+
+    assert logits.shape == (2, 12)
+    assert torch.isfinite(logits).all()
+
+
+def test_group_attention_weighs_every_group_of_every_present_slot():
+    # one weight per (slot, group, diagnosis) -- the whole point over slot_attention,
+    # whose mean over groups cannot say "the tear is in the third window"
+    model = _group_attn_model()
+    model.eval()
+    mask = torch.tensor([[True, False, True]])
+
+    with torch.no_grad():
+        weights = model.attention_weights(torch.randn(1, 3, 2, 3, SIZE, SIZE), mask)
+
+    assert weights.shape == (1, 3, 2, 12)
+    assert float(weights[0, 1].abs().max()) == 0.0, "an absent slot's groups must get no weight"
+    assert torch.allclose(weights[0].sum(dim=(0, 1)), torch.ones(12), atol=1e-5)
+
+
+def test_group_attention_can_prefer_one_group_within_a_slot():
+    # Stubbed backbone so the groups carry different features. The slot-attention
+    # head averages them before it attends, so it cannot express this at all.
+    model = _stub_backbone(_group_attn_model())
+    model.eval()
+    groups = torch.stack([torch.full((3, SIZE, SIZE), float(g)) for g in range(1, 4)])
+    x = groups.view(1, 1, 3, 3, SIZE, SIZE)
+
+    with torch.no_grad():
+        weights = model.attention_weights(x, torch.ones(1, 1, dtype=torch.bool))
+
+    spread = weights[0, 0].std(dim=0)
+    assert float(spread.max()) > 0, "every group weighed the same -- a mean in disguise"
+
+
+def test_group_attention_with_no_present_slot_reads_only_the_label_bias():
+    model = _with_trained_offsets(_group_attn_model())
+    model.eval()
+    with torch.no_grad():
+        model.label_bias.fill_(0.3)
+        logits = model(torch.zeros(1, 2, 2, 3, SIZE, SIZE),
+                       mask=torch.zeros(1, 2, dtype=torch.bool))
+
+    assert torch.allclose(logits[0], model.label_bias)
+
+
+def test_group_attention_never_runs_the_backbone_on_absent_slots():
+    model = _stub_backbone(_group_attn_model())
+    seen = []
+    model.backbone.register_forward_pre_hook(lambda _module, args: seen.append(args[0]))
+
+    model(_packable_batch(n_groups=3), mask=PACK_MASK)
+
+    assert [images.shape[0] for images in seen] == [int(PACK_MASK.sum()) * 3]

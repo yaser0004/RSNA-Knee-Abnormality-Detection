@@ -1,3 +1,4 @@
+import copy
 import datetime
 import random
 import time
@@ -240,6 +241,36 @@ def differential_param_groups(model, backbone_lr: float, head_lr: float) -> list
             {"params": head, "lr": head_lr}]
 
 
+class ModelEma:
+    """An exponential moving average of a model's weights, evaluated in place of
+    the trained weights at the end of the run.
+
+    OneCycle finishes at its learning-rate floor, but the last epochs on ~3,500
+    studies still wander, and the checkpoint is wherever they happened to stop.
+    Averaging over them costs one extra copy of the model and no GPU time worth
+    counting, and is usually worth a few thousandths. `decay` 0.999 is a
+    ~1,000-step window, about two epochs at batch 8.
+
+    Every state_dict entry is averaged, so BatchNorm's running statistics move
+    with the weights they normalise; integer buffers are copied. The copy never
+    trains -- no gradients, no optimizer -- and is kept in eval mode."""
+
+    def __init__(self, model: torch.nn.Module, decay: float = 0.999):
+        self.module = copy.deepcopy(model).eval()
+        for param in self.module.parameters():
+            param.requires_grad_(False)
+        self.decay = decay
+
+    @torch.no_grad()
+    def update(self, model: torch.nn.Module) -> None:
+        for ema_value, value in zip(self.module.state_dict().values(),
+                                    model.state_dict().values()):
+            if ema_value.dtype.is_floating_point:
+                ema_value.lerp_(value.detach().to(ema_value.device), 1.0 - self.decay)
+            else:
+                ema_value.copy_(value)
+
+
 def _unpack_batch(batch):
     """Read a batch from any loader shape: PreppedSlotDataset yields
     (image, mask, labels, uid), or (image, mask, labels, weights, uid) when
@@ -257,8 +288,9 @@ def _unpack_batch(batch):
     return images, None, labels, None
 
 
-def _optimizer_step(optimizer, scaler, scheduler) -> None:
-    """One update from the gradients accumulated so far, then clear them."""
+def _optimizer_step(optimizer, scaler, scheduler, ema=None, model=None) -> None:
+    """One update from the gradients accumulated so far, then clear them. The
+    EMA follows the optimizer step, so it averages weights, not gradients."""
     if scaler is None:
         optimizer.step()
     else:
@@ -267,10 +299,13 @@ def _optimizer_step(optimizer, scaler, scheduler) -> None:
     optimizer.zero_grad()
     if scheduler is not None:
         scheduler.step()
+    if ema is not None:
+        ema.update(model)
 
 
 def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
-                    scaler=None, scheduler=None, accumulation_steps: int = 1) -> float:
+                    scaler=None, scheduler=None, accumulation_steps: int = 1,
+                    ema: ModelEma | None = None) -> float:
     """One training epoch. A batch where every label is NaN for every study in
     it (masked_bce_loss's ValueError) is skipped rather than crashing the run
     -- possible with a small batch size and a low-coverage lexical label.
@@ -295,7 +330,10 @@ def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
     batch's step exactly; BatchNorm still normalises over the smaller batch.
     The scheduler steps once per optimizer step, so OneCycle must be built with
     ceil(len(loader) / accumulation_steps) steps per epoch. A partial group at
-    the end of the epoch still steps rather than leaking into the next epoch."""
+    the end of the epoch still steps rather than leaking into the next epoch.
+
+    `ema`, when given, is updated once per optimizer step (not per batch), so
+    its window is counted in updates whatever the accumulation."""
     if accumulation_steps < 1:
         raise ValueError(f"accumulation_steps must be at least 1, got {accumulation_steps}")
     model.train()
@@ -334,11 +372,11 @@ def train_one_epoch(model, loader: DataLoader, optimizer, device: str = "cpu",
         n_batches += 1
         pending += 1
         if pending == accumulation_steps:
-            _optimizer_step(optimizer, scaler, scheduler)
+            _optimizer_step(optimizer, scaler, scheduler, ema, model)
             pending = 0
 
     if pending:
-        _optimizer_step(optimizer, scaler, scheduler)
+        _optimizer_step(optimizer, scaler, scheduler, ema, model)
     if n_batches == 0:
         raise ValueError("no batch in this epoch had a non-NaN label")
     return total_loss / n_batches

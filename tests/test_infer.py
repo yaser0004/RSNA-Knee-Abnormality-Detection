@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from knee.infer import LABEL_COLUMNS, build_submission, rank_mean
+from knee.infer import LABEL_COLUMNS, average_source_heads, build_submission, rank_mean
 
 _SAMPLE_SUBMISSION = Path(__file__).resolve().parents[1] / "data" / "sample" / "sample_submission.csv"
 
@@ -103,3 +103,21 @@ def test_rank_mean_gives_tied_predictions_equal_ranks():
 def test_rank_mean_rejects_members_of_different_shapes():
     with pytest.raises(ValueError):
         rank_mean([np.zeros((3, 2)), np.zeros((4, 2))])
+
+
+# --- Phase 8: K label-source heads averaged back to one prediction per label ---------
+
+
+def test_average_source_heads_takes_the_mean_over_sources_per_label():
+    # two sources x two labels, source-major as multi_source_labels lays them out
+    probs = np.array([[0.2, 0.4, 0.6, 0.8]])
+
+    out = average_source_heads(probs, n_sources=2)
+
+    assert out.shape == (1, 2)
+    assert out[0].tolist() == pytest.approx([0.4, 0.6])
+
+
+def test_average_source_heads_rejects_a_width_the_sources_do_not_divide():
+    with pytest.raises(ValueError):
+        average_source_heads(np.zeros((1, 5)), n_sources=2)

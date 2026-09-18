@@ -280,25 +280,40 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
                       returns (image [slot, group, 3, H, W], presence mask, labels, uid)
                       rather than one flat slice axis, so "this study has no coronal
                       acquisition" is expressible instead of being padded over. It reads
-                      either slot table and can yield per-label sample weights
+                      either slot table, can yield per-label sample weights, reads a label
+                      frame wider than the twelve columns (label_columns, for the
+                      multi-source target), and when augmenting draws a random sorted
+                      subset of the stored slice groups so training sees the windows a
+                      fixed read never shows it (eval keeps the fixed spread)
   model.py           [done] single backbone, pooled over images; accepts either the flat
                       volume or the slot-structured one and pools only over present slots
                       (an unmasked mean averages anatomy with the black squares that
-                      absent slots arrive as), or attends over slots per diagnosis
-                      (slot_attention). Absent slots never reach the backbone, which keeps
-                      them out of BatchNorm's batch statistics
+                      absent slots arrive as), attends over slots per diagnosis
+                      (slot_attention), or attends over every (slot, group) token per
+                      diagnosis (group_attention) so a label can weigh the one window that
+                      shows its finding instead of the mean over a series. Absent slots
+                      never reach the backbone, which keeps them out of BatchNorm's batch
+                      statistics
   train.py           [done] masked BCE, fold assignment, one epoch, evaluate, experiment logging --
                        used for the real Phase 1 5-fold training run (notebooks/phase1-train/);
                        also Timer (accumulating wall-clock stopwatch feeding train_minutes),
                        load_gold_holdout + train_val_split (Phase 4's explicit gold exclusion --
                        Phase 1 trained on 36 of the 58 gold studies by accident). An epoch runs
-                       AMP, a per-step scheduler and optional gradient accumulation; the loss
-                       takes optional per-label weights, and folds can be grouped by report text
-  infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback
+                       AMP, a per-step scheduler, optional gradient accumulation and an
+                       optional ModelEma updated once per optimizer step; the loss takes
+                       optional per-label weights, and folds can be grouped by report text
+  infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback, rank mean,
+                      and average_source_heads, which folds a multi-source model's 12 x K
+                      outputs back to one probability per label
   reports.py         [done] EN/ES lexical rules (kept as a per-label fallback candidate,
                       not replaced) + the Phase 3 LLM generator: verbatim rubric,
-                      per-label criterion prompts, yes/no-logit soft scoring, and per-label
-                      confidence weights from agreement among label sources
+                      per-label criterion prompts, yes/no-logit soft scoring, per-label
+                      confidence weights from agreement among label sources, and the Phase 8
+                      target builders: fold_confidence (a hard label plus a confidence column
+                      becomes a graded score), multi_source_labels (one wide frame, a block
+                      of twelve per source, for a model with one head per source) and
+                      blend_sources (a per-label probability mean that keeps prevalence,
+                      unlike the rank blend rejected in Phase 6)
   metrics.py         [done] macro AUC, per-label AUC (NaN-safe), and paired_macro_auc_delta:
                       the bootstrap 95% CI the promotion rule ("the paired delta clears
                       noise") is evaluated against, resampling studies for both arms
@@ -374,6 +389,12 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         five training groups, and all three members reading all nine
   phase7-confirm-s2/   5-fold confirm of c2's config read at 336px (batch 4 x 2 accumulated), scored
                         as a fourth member next to c2's, c3's and f1's own pooled OOF
+  phase8-tta-s2/       the same 5-vs-9 group read for s2's five confirm checkpoints, at 336px --
+                        the read that decides whether the fourth member enters Submission C at nine
+                        groups like the other three
+  phase8-submit-c/     the four-member submission kernel: Submission B plus s2 reading the same
+                        9-group windowed artifact at its stored 336px, probability mean over twenty
+                        models
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)

@@ -83,16 +83,20 @@ def _lookup_weights(weights_df: pd.DataFrame, study_uid: str) -> torch.Tensor:
     return torch.nan_to_num(torch.tensor(values), nan=1.0)
 
 
-def _lookup_labels(labels_df: pd.DataFrame | None, study_uid: str) -> torch.Tensor | None:
+def _lookup_labels(labels_df: pd.DataFrame | None, study_uid: str,
+                   columns: list[str] = LABEL_COLUMNS) -> torch.Tensor | None:
     """None when the dataset carries no labels at all (inference); a row of
     NaN when this particular study has none (the weak-supervision case, where
-    NaN means "excluded from the loss", never "negative")."""
+    NaN means "excluded from the loss", never "negative").
+
+    `columns` defaults to the twelve competition labels; a multi-source target
+    (knee.reports.multi_source_labels) is wider, one block of twelve per source."""
     if labels_df is None:
         return None
     row = labels_df[labels_df["StudyInstanceUID"] == study_uid]
     if row.empty:
-        return torch.full((len(LABEL_COLUMNS),), float("nan"))
-    return torch.tensor(row[LABEL_COLUMNS].to_numpy()[0], dtype=torch.float32)
+        return torch.full((len(columns),), float("nan"))
+    return torch.tensor(row[columns].to_numpy(dtype=float)[0], dtype=torch.float32)
 
 
 class KneeStudyDataset(Dataset):
@@ -300,10 +304,14 @@ class PreppedSlotDataset(Dataset):
         sides: dict[str, str] | None = None,
         augment: bool = False,
         weights_df: pd.DataFrame | None = None,
+        label_columns: list[str] | None = None,
     ):
         self.study_uids = list(study_uids)
         self.npz_root = Path(npz_root)
         self.labels_df = labels_df
+        # the twelve competition labels unless the target is the wide multi-source
+        # frame, whose columns are "{source}:{label}"
+        self.label_columns = list(label_columns) if label_columns is not None else list(LABEL_COLUMNS)
         # per-label sample weights (knee.reports.confidence_from_agreement).
         # Opt-in: with none set the batch keeps its 4-tuple shape, so a config
         # screened before this existed still pairs against one screened after.
@@ -323,7 +331,7 @@ class PreppedSlotDataset(Dataset):
     def __getitem__(self, idx: int):
         study_uid = self.study_uids[idx]
         image, mask = self._load_image(study_uid)
-        labels = _lookup_labels(self.labels_df, study_uid)
+        labels = _lookup_labels(self.labels_df, study_uid, self.label_columns)
         if self.weights_df is None:
             return image, mask, labels, study_uid
         return image, mask, labels, _lookup_weights(self.weights_df, study_uid), study_uid
@@ -344,7 +352,15 @@ class PreppedSlotDataset(Dataset):
         so this is only worth revisiting if a config actually reads fewer."""
         stored = len(slices) // SLICE_GROUP
         if stored >= self.n_groups:
-            picks = np.linspace(0, stored - 1, num=self.n_groups).round().astype(int)
+            if self.augment and stored > self.n_groups:
+                # train-time only: a random sorted subset of the stored windows,
+                # so over the epochs the model sees the in-between groups a
+                # fixed read never shows it. Eval keeps the fixed spread below,
+                # which is what lets a 5-of-9 read reproduce a 5-group confirm.
+                # torch's RNG, like augment_volume, so seeding the run seeds this.
+                picks = torch.randperm(stored)[: self.n_groups].sort().values.numpy()
+            else:
+                picks = np.linspace(0, stored - 1, num=self.n_groups).round().astype(int)
             return [slices[g * SLICE_GROUP + j] for g in picks for j in range(SLICE_GROUP)]
 
         wanted = self.n_groups * SLICE_GROUP

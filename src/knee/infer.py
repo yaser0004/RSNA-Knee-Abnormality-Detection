@@ -74,3 +74,14 @@ def rank_mean(per_model: list[np.ndarray]) -> np.ndarray:
     if n_studies == 1:
         return np.full_like(ranked, 0.5)
     return (ranked - 1) / (n_studies - 1)
+
+
+def average_source_heads(probs: np.ndarray, n_sources: int) -> np.ndarray:
+    """Fold the 12 x K outputs of a model trained on knee.reports.multi_source_labels
+    back to one probability per label. The heads are source-major, so this is
+    the mean over axis 1 of [n, K, 12]: one model's K readings of each study,
+    ensembled."""
+    n_studies, width = probs.shape
+    if n_sources < 1 or width % n_sources:
+        raise ValueError(f"{width} columns do not split into {n_sources} sources")
+    return probs.reshape(n_studies, n_sources, width // n_sources).mean(axis=1)

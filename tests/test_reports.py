@@ -6,7 +6,10 @@ import pytest
 
 from knee.infer import LABEL_COLUMNS
 from knee.reports import (
+    blend_sources,
     confidence_from_agreement,
+    fold_confidence,
+    multi_source_labels,
     report_group_key,
     build_label_prompt,
     build_lexical_labels,
@@ -277,3 +280,76 @@ class TestConfidenceFromAgreement:
         b = pd.DataFrame({"ACL": [1.0, 1.0]}, index=["b", "c"])
         w = confidence_from_agreement([a, b], ["ACL"])
         assert sorted(w.index) == ["a", "b", "c"]
+
+
+class TestMultiSourceLabels:
+    """Phase 8 bet 1: one head per label source instead of one blended target.
+
+    The rank blend of the sources scored highest on gold and was still rejected
+    as a target, because percentile ranks put every label's mean at exactly 0.5
+    (NOTES 2026-09-07). A wide frame sidesteps that: each source keeps its own
+    columns and its own prevalence, the model gets 12 x K logits, and the K heads
+    are averaged only at inference."""
+
+    def _sources(self):
+        a = pd.DataFrame({"ACL": [1.0, 0.0], "MCL": [0.2, 0.8]}, index=["s1", "s2"])
+        b = pd.DataFrame({"ACL": [0.9], "MCL": [0.1]}, index=["s1"])
+        return {"a": a, "b": b}
+
+    def test_columns_are_source_major_in_the_given_order(self):
+        wide = multi_source_labels(self._sources(), ["ACL", "MCL"])
+        assert list(wide.columns) == ["a:ACL", "a:MCL", "b:ACL", "b:MCL"]
+
+    def test_a_study_a_source_never_rated_is_nan_not_zero(self):
+        wide = multi_source_labels(self._sources(), ["ACL", "MCL"])
+        assert np.isnan(wide.loc["s2", "b:ACL"])
+        assert wide.loc["s1", "b:ACL"] == 0.9
+
+    def test_index_is_the_union_of_the_sources(self):
+        wide = multi_source_labels(self._sources(), ["ACL", "MCL"])
+        assert sorted(wide.index) == ["s1", "s2"]
+
+
+class TestBlendSources:
+    """The probability-scale alternative to the rejected rank blend: a per-label
+    mean of the sources' graded scores keeps each label's prevalence."""
+
+    def test_a_label_rated_by_one_source_only_equals_that_source(self):
+        a = pd.DataFrame({"ACL": [0.7]}, index=["s1"])
+        b = pd.DataFrame({"ACL": [np.nan]}, index=["s1"])
+        assert blend_sources([a, b], ["ACL"]).loc["s1", "ACL"] == pytest.approx(0.7)
+
+    def test_a_label_rated_by_two_sources_is_their_mean(self):
+        a = pd.DataFrame({"ACL": [0.7]}, index=["s1"])
+        b = pd.DataFrame({"ACL": [0.1]}, index=["s1"])
+        assert blend_sources([a, b], ["ACL"]).loc["s1", "ACL"] == pytest.approx(0.4)
+
+    def test_prevalence_is_preserved_unlike_a_rank_blend(self):
+        values = [1.0] + [0.0] * 9
+        a = pd.DataFrame({"ACL": values}, index=[f"s{i}" for i in range(10)])
+        assert blend_sources([a, a.copy()], ["ACL"])["ACL"].mean() == pytest.approx(0.1)
+
+    def test_a_study_no_source_rated_stays_nan(self):
+        a = pd.DataFrame({"ACL": [np.nan]}, index=["s1"])
+        assert np.isnan(blend_sources([a], ["ACL"]).loc["s1", "ACL"])
+
+
+class TestFoldConfidence:
+    """Two public sources ship a hard label plus a confidence column. A 1 held
+    at confidence c scores c and a 0 held at c scores 1 - c, which turns a
+    two-level predictor into a graded one -- the mapping the Step 4 gold arm and
+    the confidence-weight cell each re-implemented by hand."""
+
+    def test_a_label_held_with_confidence_scores_that_confidence(self):
+        df = pd.DataFrame({"ACL": [1.0, 0.0], "ACL__conf": [0.8, 0.8]}, index=["s1", "s2"])
+        out = fold_confidence(df, ["ACL"])
+        assert out.loc["s1", "ACL"] == pytest.approx(0.8)
+        assert out.loc["s2", "ACL"] == pytest.approx(0.2)
+
+    def test_a_label_without_a_confidence_column_passes_through(self):
+        df = pd.DataFrame({"ACL": [1.0, 0.0]}, index=["s1", "s2"])
+        assert fold_confidence(df, ["ACL"])["ACL"].tolist() == [1.0, 0.0]
+
+    def test_a_missing_confidence_counts_as_a_coin_flip(self):
+        df = pd.DataFrame({"ACL": [1.0], "ACL__conf": [np.nan]}, index=["s1"])
+        assert fold_confidence(df, ["ACL"]).loc["s1", "ACL"] == pytest.approx(0.5)

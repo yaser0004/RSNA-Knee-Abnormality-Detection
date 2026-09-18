@@ -11,7 +11,7 @@ class KneeModel(nn.Module):
     def __init__(self, backbone_name: str = "efficientnet_b0", num_labels: int = 12,
                  pretrained: bool = True, head: str = "mean", **backbone_kwargs):
         super().__init__()
-        if head not in ("mean", "slot_attention"):
+        if head not in ("mean", "slot_attention", "group_attention"):
             raise ValueError(f"unknown head {head!r}")
         # kwargs go straight to timm: a ViT needs img_size to build its position
         # embedding for the resolution it will actually see, and only timm knows
@@ -22,10 +22,10 @@ class KneeModel(nn.Module):
         self.num_labels = num_labels
         n_features = self.backbone.num_features
         self.head = nn.Linear(n_features, num_labels)
-        if head == "slot_attention":
-            # one attention score per (slot, diagnosis), and a per-diagnosis
-            # readout so each label reads its own pooled feature rather than a
-            # shared one
+        if head in ("slot_attention", "group_attention"):
+            # one attention score per (slot, diagnosis) -- or per (slot, group,
+            # diagnosis) for the group head -- and a per-diagnosis readout so each
+            # label reads its own pooled feature rather than a shared one
             self.slot_scores = nn.Linear(n_features, num_labels)
             self.label_readout = nn.Parameter(torch.empty(num_labels, n_features))
             nn.init.normal_(self.label_readout, std=n_features ** -0.5)
@@ -46,6 +46,9 @@ class KneeModel(nn.Module):
         if self.head_kind == "slot_attention":
             slot_features = self._slot_features(x, mask)
             return self._attend(slot_features, mask)[0]
+        if self.head_kind == "group_attention":
+            tokens, present = self._group_tokens(x, mask)
+            return self._attend(tokens, present)[0]
 
         if x.dim() == 6:
             batch, n_slots, n_groups = x.shape[:3]
@@ -108,6 +111,35 @@ class KneeModel(nn.Module):
         features = self._backbone_features(flat, present).view(batch, n_slots, n_groups, -1)
         return features.mean(dim=2)
 
+    def _group_tokens(self, x: torch.Tensor,
+                      mask: torch.Tensor | None = None) -> tuple[torch.Tensor, torch.Tensor | None]:
+        """[batch, n_slots, n_groups, 3, H, W] -> one token per (slot, group),
+        [batch, n_slots * n_groups, features], with the presence mask repeated
+        over each slot's groups.
+
+        Nothing is averaged here, which is the difference from _slot_features:
+        a tear shows in one or two windows of a series, and a mean over the
+        groups dilutes it by the windows that show healthy tissue. Reading the
+        same checkpoints at 9 groups instead of 5 gained +0.005 to +0.009 with no
+        retraining (NOTES 2026-09-14), so the windows carry signal the mean was
+        discarding; per-diagnosis attention over the tokens lets each label weigh
+        the window that shows its finding.
+
+        ponytail: no positional embedding, so a token does not know its depth or
+        its slot beyond what the backbone sees. Add a relative-depth encoding
+        (g / (n_groups - 1), so a 5-group and a 9-group read agree) if a screen
+        shows position matters."""
+        if x.dim() != 6:
+            raise ValueError(
+                "the group_attention head needs [batch, n_slots, n_groups, 3, H, W]; "
+                f"got {tuple(x.shape)}. The flat volume has no slot or group axis to attend over."
+            )
+        batch, n_slots, n_groups, channels, height, width = x.shape
+        flat = x.reshape(batch * n_slots * n_groups, channels, height, width)
+        present = None if mask is None else mask.repeat_interleave(n_groups, dim=1)
+        features = self._backbone_features(flat, present).view(batch, n_slots * n_groups, -1)
+        return features, present
+
     def _attend(self, slot_features: torch.Tensor,
                 mask: torch.Tensor | None) -> tuple[torch.Tensor, torch.Tensor]:
         """Per-diagnosis masked attention over slots. Returns (logits, weights)."""
@@ -128,8 +160,13 @@ class KneeModel(nn.Module):
         return logits, weights
 
     def attention_weights(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
-        """[batch, n_slots, num_labels] -- which plane each diagnosis reads.
-        Exposed because it is the claim c2 makes: a mean-pool head cannot say
-        "MCL lives in the coronal plane", and this one should be checkable
-        against the anatomy rather than trusted."""
+        """[batch, n_slots, num_labels] -- which plane each diagnosis reads --
+        or [batch, n_slots, n_groups, num_labels] for the group head, which
+        also says which window. Exposed because it is the claim c2 makes: a
+        mean-pool head cannot say "MCL lives in the coronal plane", and this one
+        should be checkable against the anatomy rather than trusted."""
+        if self.head_kind == "group_attention":
+            tokens, present = self._group_tokens(x, mask)
+            weights = self._attend(tokens, present)[1]
+            return weights.view(x.shape[0], x.shape[1], x.shape[2], self.num_labels)
         return self._attend(self._slot_features(x, mask), mask)[1]

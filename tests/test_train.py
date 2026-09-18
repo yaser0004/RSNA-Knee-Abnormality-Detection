@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 from knee.infer import LABEL_COLUMNS
 from knee.model import KneeModel
 from knee.train import (
+    ModelEma,
     Timer,
     differential_param_groups,
     evaluate,
@@ -607,3 +608,49 @@ class TestWeightedMaskedBceLoss:
         logits, targets = self._fixture()
         with pytest.raises(ValueError, match="weight"):
             masked_bce_loss(logits, targets, weights=torch.zeros_like(targets))
+
+
+# --- Phase 8: EMA weights ----------------------------------------------------------
+
+
+def test_model_ema_tracks_an_exponential_average_of_the_weights():
+    model = torch.nn.Linear(1, 1, bias=False)
+    with torch.no_grad():
+        model.weight.fill_(0.0)
+    ema = ModelEma(model, decay=0.5)
+
+    for value in (2.0, 4.0):
+        with torch.no_grad():
+            model.weight.fill_(value)
+        ema.update(model)
+
+    # 0 -> 0.5*0 + 0.5*2 = 1 -> 0.5*1 + 0.5*4 = 2.5
+    assert float(ema.module.weight) == pytest.approx(2.5)
+
+
+def test_model_ema_is_a_separate_copy_that_never_trains():
+    model = torch.nn.Linear(1, 1, bias=False)
+    ema = ModelEma(model, decay=0.9)
+
+    with torch.no_grad():
+        model.weight.fill_(7.0)
+
+    assert float(ema.module.weight) != 7.0
+    assert not any(p.requires_grad for p in ema.module.parameters())
+
+
+def test_train_one_epoch_updates_the_ema_once_per_optimizer_step():
+    # 6 studies at batch 2, accumulated in twos: two optimizer steps (one full
+    # group, one partial), so two EMA updates -- not one per batch
+    torch.manual_seed(0)
+    model = _NoBatchNormModel()
+    loader = torch.utils.data.DataLoader(_TinySyntheticDataset(n_studies=6, size=8), batch_size=2)
+    optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+    ema = ModelEma(model, decay=0.9)
+    updates = []
+    real_update = ema.update
+    ema.update = lambda m: (updates.append(1), real_update(m))[1]
+
+    train_one_epoch(model, loader, optimizer, device="cpu", accumulation_steps=2, ema=ema)
+
+    assert len(updates) == 2
