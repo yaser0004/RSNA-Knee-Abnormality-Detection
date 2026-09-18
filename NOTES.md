@@ -3402,3 +3402,30 @@ rotated: c2+c3+f1 at 9 groups, CV-weighted blend against the plain mean, **+0.00
 +0.0007]**. The full-fit weights move (Contusion would go 0.92 to c3, Synovitis 0.55 to c2) but the
 gain does not survive the fold rotation. The plain probability mean stays; the script re-runs each
 time a member is added, and only a CV delta whose CI excludes zero would change the blend.
+
+### The three Phase 8 screens are built and dry-run; a two-slot member is now insurance-wrapped (2026-09-19)
+
+**Screens A, B and C exist as kernels** (`phase8-screen-arch`, `-target`, `-scale`), each derived
+from the Phase 7 resolution screen's setup, gate and folds cells by asserted text swaps, each with its
+arms, pairings and member-gain readouts as pre-registered in the Phase 8 plan. All three ran end to end
+on the 20-study sample through `nbrun.py` (64-70px, one epoch, batch 1, `pretrained=False`, mock
+fold-0 arrays for c2, c3, f1 and s2 sized to the sample, four of its studies standing in as gold).
+The local numbers mean nothing -- a random-init backbone emits near-constant predictions, so every
+"as a fifth member" delta is exactly zero and every nine-versus-five read is identical -- but every
+cell, every branch of every report, and Screen C's out-of-memory fallback (which the shared local GPU
+triggered for real) executed.
+
+**Screen C's dry run found a loader property worth knowing.** A member reading two slots
+(`slot_names[:2]`: SAG_FLUID, COR_FLUID) raises `StudyDecodeError` on a study that has neither, because
+`load_study_npz(order=...)` filters to the requested slots. The competition's full `train_series.csv`
+says **every one of the 4,407 training studies has a sagittal or coronal fluid-sensitive series**
+(SAG_FLUID fills 94.2%, COR_FLUID 96.4%, their union 100%), which is why the c3 confirm and both
+submissions never hit it. The hidden set has no such guarantee, and in the submission kernel one
+member's raise inside `predict_one` would have sent the *whole* study -- every member -- to the 0.5
+fallback. `phase8-submit-c` now catches a member that finds none of its slots, averages the members
+that could read the study, counts the skips in the log, and raises (hence 0.5) only if no member read
+anything. Zero effect on any training study; insurance on the hidden ones.
+
+**Screen B's blend arm is steven_v4 + ours + lixin73**, the three best independent sources on gold
+(0.8927 / 0.8616 / 0.8488); pilkwang_v2 (0.8142) stays out of the blend but is one of the four heads
+in the multi-source arm, whose report also prints each head alone and the average without it.
