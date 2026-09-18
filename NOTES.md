@@ -3429,3 +3429,8 @@ anything. Zero effect on any training study; insurance on the hidden ones.
 **Screen B's blend arm is steven_v4 + ours + lixin73**, the three best independent sources on gold
 (0.8927 / 0.8616 / 0.8488); pilkwang_v2 (0.8142) stays out of the blend but is one of the four heads
 in the multi-source arm, whose report also prints each head alone and the average without it.
+
+**Final-selection rule verified by the user on the competition's My Submissions page (2026-09-19):
+two final submissions can be selected** (a third attempt is refused with "you have selected the
+maximum number of submissions"). Under Kaggle's rule the better private score of the two counts, so
+the Phase 8 plan's second slot -- the gold-fine-tuned aggressive pick -- is a free hedge, not a risk.
