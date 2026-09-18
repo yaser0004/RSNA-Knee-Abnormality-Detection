@@ -19,11 +19,6 @@ venv/
 # kaggle credentials — never committed
 kaggle.json
 
-# AI tooling artifacts
-.remember/
-.claude/
-.agy/
-
 # OS / editor
 .DS_Store
 *.swp

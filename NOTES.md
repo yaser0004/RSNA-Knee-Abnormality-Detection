@@ -107,7 +107,7 @@ stays the stable strategy reference; this is the fast-moving log of what was act
   Fluid_Sensitive) covers **94.2% of studies (4,150/4,407)** with an exact match; the rest fall
   through to the top-up branch and get an arbitrary series. Close enough to ignore for a pipeline-
   validation baseline — 100% of studies have *some* Sagittal series, just not always fluid-sensitive.
-- Caught two real bugs via advisor review before they'd have silently broken training: (1)
+- Caught two real bugs in review before they'd have silently broken training: (1)
   `per_label_auc` crashed on NaN targets (`np.unique` doesn't treat NaN as "one class", so the
   single-class guard let NaN through to `roc_auc_score`, which raises) — lexical labels produce NaN
   for every unmatched study, so this would have broken on the very first real run. Fixed by masking
@@ -3154,3 +3154,199 @@ next to f1 it did not become a more diverse one either.
 **What the control row also prices:** a fourth model of any decent config is worth about +0.0015 on
 this fold. That is the bar a later member has to clear to justify its own confirm, and it is also a
 cheap option in its own right -- more seeds of confirmed configs buy it without a new screen.
+
+### Slice-window averaging is worth a third model, and f1 is confirmed as one (2026-09-14)
+
+**`knee-phase7-tta`** (67.6 min, nothing trained): every c2 and c3 confirm checkpoint re-read its
+own held-out fold and the 58 gold studies from the 9-group prep, once at 5 groups and once at 9.
+
+**The comparison is valid.** Reading 5 of the 9 stored groups reproduced the confirm runs exactly --
+c2 macro 0.84850 against 0.84850 (largest prediction difference 8.3e-07), c3 0.84912 against 0.84912
+(3.1e-06) -- and reading all 9 moved predictions by up to 0.54, so the in-between groups carry
+anatomy the models respond to.
+
+| model | pooled OOF, 5 -> 9 groups | gold, 5 -> 9 groups |
+|---|---|---|
+| c2 | 0.8485 -> 0.8571, +0.0086 [+0.0072, +0.0100] | 0.8794 -> 0.8942, +0.0147 [+0.0033, +0.0273] |
+| c3 | 0.8491 -> 0.8543, +0.0052 [+0.0038, +0.0065] | 0.8805 -> 0.8834, +0.0029 [-0.0057, +0.0122] |
+| c2+c3 | 0.8641 -> 0.8686, +0.0045 [+0.0034, +0.0055] | 0.8919 -> 0.9028, +0.0109 [+0.0032, +0.0203] |
+
+Averaging four more slice windows at inference is worth about what a confirmed third model is, and
+costs only inference time. By the rule registered before the run, **9-group reads go into
+Submission B.** One prep pass serves every member: a 9-group artifact windowed on its five training
+groups reads back as the 5-group artifact exactly, so a member staying at 5 groups needs no second
+prep.
+
+**`knee-phase7-confirm-f1`** (6.33 h), ConvNeXt-tiny over five folds:
+
+| fold | val macro | gold |
+|---|---|---|
+| 0 | 0.8516 | 0.8887 |
+| 1 | 0.8479 | 0.8713 |
+| 2 | 0.8438 | 0.8776 |
+| 3 | 0.8216 | 0.8293 |
+| 4 | 0.8547 | 0.8833 |
+| **pooled OOF (n=4,349) / gold 5-fold mean** | **0.8442** | **0.8945** |
+
+- Alone it sits slightly below c2 on OOF, -0.0043 [-0.0080, -0.0006], and is the best single config
+  yet on gold (+0.0151 [-0.0036, +0.0332] over c2, spanning zero). Fold 3 is its weak fold.
+- **Added to c2+c3: +0.0038 [+0.0028, +0.0049] pooled OOF**, probability mean, CI excluding zero;
+  gold +0.0062 [-0.0006, +0.0127]. Rank mean again gains less (+0.0020). The fold-0 screen said
+  +0.0062, so the confirm keeps about 60% of it -- fold 0 flattered f1 as it flattered c2.
+- **Promoted as the third member:** it clears the +0.0015 bar with a CI that excludes zero.
+
+**The Submission B candidate, scored offline** from the saved arrays, rows and labels checked
+identical (4,349 OOF, 58 gold):
+
+| ensemble | pooled OOF | gold |
+|---|---|---|
+| Submission A: c2+c3, 5 groups | 0.8641 | 0.8919 |
+| c2+c3, 9 groups | 0.8686 | 0.9028 |
+| c2+c3+f1, 5 groups | 0.8679 | 0.8980 |
+| **c2+c3 at 9 groups, f1 at 5** | **0.8705** | **0.9051** |
+
+- Against Submission A: **+0.0064 [+0.0051, +0.0078] OOF and +0.0132 [+0.0053, +0.0223] gold**,
+  both CIs excluding zero.
+- The two gains partly overlap: +0.0045 from the windows and +0.0038 from f1 separately, +0.0064
+  together. f1 on top of the 9-group pair still adds +0.0020 [+0.0010, +0.0030] OOF.
+- f1 at 9 groups is not measured yet; `knee-phase7-tta-f1` runs the same read on its checkpoints
+  before Submission B is built.
+
+### f1 gains from nine windows too; confidence weights hurt; 336px earns a confirm (2026-09-14)
+
+**`knee-phase7-tta-f1`** (42.5 min): the same read on f1's five confirm checkpoints. The 5-group read
+reproduced f1's confirm exactly (macro 0.84420 against 0.84420, largest prediction difference 0) and
+nine groups moved predictions by up to 0.52. **f1: 0.8442 -> 0.8495, +0.0053 [+0.0041, +0.0065]
+pooled OOF**; gold 0.8945 -> 0.8964, +0.0020 [-0.0049, +0.0088]. By the same rule, f1 reads nine
+groups in Submission B.
+
+**`knee-phase7-screen-res`** (fold 0, c2's six-slot config, one session):
+
+| arm | val macro | gold | backbone images per batch | peak GPU | train min |
+|---|---|---|---|---|---|
+| 224, batch 8 (control) | 0.8565 | 0.8626 | 193.5 | 9.9 GB | 52.2 |
+| 224, batch 8, confidence weights (s3) | 0.8476 | 0.8556 | 193.5 | 10.1 GB | 50.5 |
+| 224, batch 4 x 2 accumulated | 0.8515 | 0.8536 | 96.8 | 5.3 GB | 48.7 |
+| 336, batch 4 x 2 accumulated (s2) | 0.8588 | 0.8693 | 96.8 | 12.0 GB | 89.9 |
+
+- **Confidence weights hurt: -0.0089 [-0.0153, -0.0014]** val against the control; gold -0.0070,
+  spanning zero. The prior recorded before it ran was weak -- source disagreement correlated with gold
+  AUC with the wrong sign -- and the screen sided with the prior. Its training loss ended lowest of the
+  four (0.3263), so the weighted loss was fit, not ignored. **s3 is closed.**
+- **Accumulation alone: -0.0050 [-0.0119, +0.0016]**, spanning zero. BatchNorm over 4 studies instead
+  of 8 may cost a little; n=863 does not resolve it.
+- **336 against 224 at the same batch: +0.0074 [+0.0007, +0.0146]**, CI excluding zero -- the first
+  resolution effect this project has measured, and it shows through the accumulation penalty both
+  arms share.
+- **As a fourth member next to c2+c3+f1** (fold 0, 5-group reads): **s2 adds +0.0021 [+0.0006,
+  +0.0037]**, CI excluding zero, against **+0.0006 [-0.0010, +0.0023]** for one more 224px c2 model
+  trained in the same session (and +0.0015 in the earlier session). s3 adds +0.0005. Gold spans zero
+  for all three. **s2 is worth a five-fold confirm** (`knee-phase7-confirm-s2`, ~7.7 h at 90 min a
+  fold).
+- **One caution for that confirm:** the member comparison used 5-group reads, and Submission B reads
+  nine. Whether 336px adds to nine-window averaging or overlaps with it is not measured; the confirm's
+  checkpoints can take the same 5-vs-9 read afterwards.
+
+**Submission B, final configuration.** c2, c3 and f1, five folds each, all reading nine groups from
+one windowed prep pass, probability mean over fifteen models (`knee-phase7-submit-b`; the local dry run
+loaded all fifteen checkpoints and ran every cell on the multi-slice test study). Offline, from the
+saved arrays with rows and labels checked identical:
+
+| ensemble | pooled OOF | gold |
+|---|---|---|
+| Submission A (c2+c3, 5 groups), scored 0.916 | 0.8641 | 0.8919 |
+| c2+c3 at 9 groups, f1 at 5 | 0.8705 | 0.9051 |
+| **Submission B: c2+c3+f1, all at 9 groups** | **0.8713** | **0.9059** |
+
+Against Submission A: **+0.0072 [+0.0057, +0.0087] OOF and +0.0140 [+0.0055, +0.0243] gold.** Reading
+f1 at nine rather than five adds +0.0007 [+0.0003, +0.0011] OOF.
+
+### Pre-registered band for Submission B, written before it is pushed (2026-09-14)
+
+**What is known.** Four gold -> LB pairs: +0.038, +0.016, +0.026 and +0.024 (0.8919 -> 0.916). Two
+ways to read B:
+
+- *offset method*: B's gold 0.9059 plus the last three offsets (+0.016 to +0.026) gives 0.922-0.932;
+- *delta method*: Submission A gained +0.011 on the LB over c2 alone, against a measured +0.0125 gold
+  and +0.0156 OOF -- roughly 70-90% of the measurement. Applied to B's +0.0072 OOF and +0.0140 gold
+  over A, that is +0.005 to +0.013: 0.921-0.929.
+
+| LB | reading |
+|---|---|
+| **below 0.916** | **something is broken on the test path.** B beats A on both tiers with CIs excluding zero; a score under A means the nine-group windowed prep or the f1 load behaves differently on hidden DICOMs -- check the log's fallback count and slot fill first |
+| 0.916 - 0.920 | the gains partly transferred: the windows and f1 correct errors the hidden set shares with A less than our folds do |
+| **0.921 - 0.930** | **expected** |
+| 0.931 - 0.936 | better than both methods predict |
+| **0.937 or above** | past the 0.936 spike (rank ~790 on the 2026-09-13 board); within the offset method's upper reach, but beyond the delta method's |
+
+The public LB is ~390 studies, so one score is a noisy read of which row B landed in.
+
+**Submitted** as 56227030 from `knee-phase7-submit-b` version 1, after the band above. Its log before
+submitting: src guards passed, 15 checkpoints across the three members all reading nine groups,
+**0 of 3 on the 0.5 fallback**, slot fill (4, 4, 5) and laterality routes identical to Submission A's
+on the same three studies. Inference is 6.0 s/study against A's 3.3 -- the nine-group prep and five
+more models -- which at ~1,300 hidden studies is ~2.2 h, within the runtime limit.
+
+### Submission B scored 0.921; the 336px member is confirmed; the field re-read (2026-09-19)
+
+**0.921** (submission 56227030), up from 0.916. On the 2026-09-18 board (3,959 teams) that is rank
+**1,789**; median 0.913. It landed at the **floor of the pre-registered band** (0.921-0.930): exactly
+the delta method's floor and 0.001 under the offset method's. Against Submission A the LB moved
+**+0.005** for a measured +0.0072 pooled OOF and +0.0140 gold, so the gains transferred at roughly 70%
+of the OOF delta and a third of the gold one. The gold -> LB offset is now **+0.015** (0.9059 -> 0.921),
+the fifth pair after +0.038, +0.016, +0.026, +0.024 -- it has shrunk every time gold rose. Nothing
+points at breakage: the log showed 0 fallbacks and the same slot fill and laterality routes as A.
+
+**s2 is confirmed** (`knee-phase7-confirm-s2`, 8.61 h: c2's six-slot attention config read at 336px,
+batch 4 x 2 accumulated, 5 folds of `primary_v3`, target `steven_v4`, gold held out of every split):
+
+| fold | val macro | gold |
+|---|---|---|
+| 0 | 0.8628 | 0.8592 |
+| 1 | 0.8482 | 0.8661 |
+| 2 | 0.8457 | 0.8650 |
+| 3 | 0.8683 | 0.8692 |
+| 4 | 0.8472 | 0.8598 |
+| **pooled OOF (n=4,349)** | **0.8538** | -- |
+| **gold 5-fold mean** | -- | **0.8833** |
+
+- **s2 minus c2 (336 against 224): +0.0053 [+0.0020, +0.0085]** pooled OOF, CI excluding zero; gold
+  +0.0039 [-0.0100, +0.0193], spanning zero. The fold-0 screen said +0.0074; the confirm keeps ~70%.
+- **s2 added to c2+c3+f1 (all at 5 groups): +0.0042 [+0.0033, +0.0051]** pooled OOF, 0.8679 -> 0.8721,
+  CI excluding zero -- nearly three times the +0.0015 one more known model prices at. Gold -0.0010
+  [-0.0062, +0.0044], spanning zero: n=58 does not resolve a fourth member either way.
+- By the rule registered before the run, **s2 is the fourth member.** Per label on gold it is strongest
+  on Baker's (0.978), Medial OA (0.963), ACL (0.953) and MCL (0.952), weakest on Synovitis (0.736) and
+  Lateral Meniscus (0.793) -- the same shape as c2.
+- Not yet read at 9 groups; that read (Phase 8 Step 1) precedes Submission C. The six rows are in
+  `results/experiments.csv`; checkpoints and OOF/gold arrays under `checkpoints/knee-phase7-confirm-s2/`.
+
+**The field, re-pulled 2026-09-18.** 3,959 teams (339 more than on 09-12). 1st **0.957** (135
+submissions), then 0.955 x3, 0.954 x8, 0.953 x6, 0.952 x7, 0.951 x6, 0.950 x7. The spikes grew: **538
+teams at exactly 0.941** (was 264), 321 at 0.936, 179 at 0.940. Ranks behind ties:
+
+| score | teams at it | rank if we score it |
+|---|---|---|
+| 0.925 | 12 | 1,681 |
+| 0.936 | 321 | 1,433 |
+| 0.940 | 179 | 892 |
+| 0.941 | 538 | 713 |
+| 0.942 | 28 | 175 |
+| 0.945 | 24 | 100 |
+| 0.950 | 7 | 39 |
+| 0.953 | 6 | 19 |
+| 0.955 | 3 | 5 |
+| 0.957 | 1 | 2 (sole first needs 0.958) |
+
+**The arithmetic for first place.** 0.921 -> 0.957 is +0.036 on the public LB. With the offset at
++0.015 and shrinking, LB 0.955 needs gold about 0.945 and pooled OOF against steven_v4 near 0.90 (now
+0.8713, ~0.876 expected with s2 at 9 groups). The top 30 sit inside 0.006 and the private set (~910 of
+~1,300 studies) will reshuffle them by about that much; several leaders have 100+ public submissions.
+The measured levers, summed at the gold tier, are +0.02 to +0.04 -- perhaps +0.015 to +0.03 on the LB at
+B's transfer rate. That is the gap with no slack, which is why Phase 8 pre-registers every screen and
+promotes only on a paired pooled-OOF CI.
+
+**Three decisions taken 2026-09-19:** main leaderboard only (the Efficiency Track entry is dropped;
+runtime stays logged for the record); the 58 gold studies may enter training for the final aggressive
+pick only, after every screening decision is closed; free compute only, with Colab free as a third lane
+for fold-0 screens. **Phase 8 plan:** `ai/plans/2026-09-19-phase8-win-plan.md` (supersedes Phase 7's).

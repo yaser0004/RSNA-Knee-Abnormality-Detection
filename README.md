@@ -3,7 +3,8 @@
 Solo entry for the Kaggle competition
 [RSNA Knee Abnormality Detection](https://www.kaggle.com/competitions/rsna-knee-abnormality-detection):
 predict per-study probabilities for 12 binary knee-MRI findings from multi-series DICOM studies,
-scored by macro-averaged ROC AUC. Targets both the main leaderboard and the Efficiency Track.
+scored by macro-averaged ROC AUC. Targets the main leaderboard; the Efficiency Track entry was
+dropped on 2026-09-19 (runtime is still logged for the record).
 
 Full strategy lives in the plan document (not tracked in this repo); empirical findings from actually
 running things (timing numbers, data quirks, model behavior) go in `NOTES.md` as they're discovered,
@@ -28,9 +29,18 @@ Phase 5's 0.8189) and submitted from `notebooks/phase6-submit/` — scored **0.9
 inside its pre-registered band; **Phase 7 in progress** — c3 is confirmed on five folds, and the
 two-config ensemble (pooled OOF **+0.0156 [+0.0136, +0.0175]** over c2 alone) was submitted from
 `notebooks/phase7-submit/` and scored **0.916**, up from 0.905 and inside its pre-registered band;
-the recovered slot table (prep v3) is built and being screened — see below.**
+prep v3's nineteen-slot table was screened and tied the six-slot one, while averaging slice windows
+at inference and ConvNeXt-tiny as a third member each measured as a gain; Submission B combined
+them and scored **0.921** (rank 1,789 of 3,959 on 2026-09-18), at the floor of its pre-registered band;
+c2's config read at 336px is confirmed as a fourth member (pooled OOF +0.0042 [+0.0033, +0.0051]);
+**Phase 8** now targets the 0.95 cluster — plan in `ai/plans/2026-09-19-phase8-win-plan.md`, findings
+in `NOTES.md` from 2026-09-19.**
 
-**Where we actually stand, and what Phase 7 aims at.** As of 2026-09-12 the field was 3,620 teams:
+**Where we actually stand.** On 2026-09-18 the field was 3,959 teams: 1st **0.957**, median **0.913**,
+our 0.921 at rank **1,789**. The spikes grew — 538 teams at exactly 0.941, 321 at 0.936 — so 0.942 ranks
+175, 0.945 ranks 100, 0.950 ranks 39 and 0.955 ranks 5: the 0.95 cluster is Phase 8's target, and the
+honest arithmetic (gold→LB offset now +0.015 and shrinking) says it needs gold near 0.945. Earlier
+readings, kept for the record: as of 2026-09-12 the field was 3,620 teams:
 1st 0.955, median **0.909**, and our 0.905 sat **below** the median at rank ~1855; on 2026-09-13
 Submission A's **0.916** ranks **1,671 of 3,638**, above it. The top is
 not a smooth shelf but **spikes of identical scores** — 379 teams at exactly 0.936, 140 at 0.940,
@@ -52,7 +62,7 @@ rival that runs in 30 minutes would need 0.925 *at zero runtime*. (It is not hop
 model taking four hours scores worse than our submitted 0.835 at 68 minutes, because the track really
 does reward accuracy per second — but accuracy is the lever in both tracks.)
 
-**Phase 7 so far.** Six findings, each measured rather than assumed:
+**Phase 7 so far.** Ten findings, each measured rather than assumed:
 
 | finding | evidence |
 |---|---|
@@ -62,6 +72,10 @@ does reward accuracy per second — but accuracy is the lever in both tracks.)
 | **Absent slots were still run through the backbone.** The mask kept them out of pooling, but each fed a black image into BatchNorm's training statistics, and at 19 slots they would be 73% of backbone compute. Now packed out before the backbone; eval logits are unchanged for any study with a present slot, so the scored checkpoints are unaffected | equivalence tests on both heads; 19-slot load 1,243 → 120 ms/study |
 | **The recovered nineteen-slot table is a different model, not a better one.** Under c2's config it ties the six-slot table on fold 0, and averaging the two beats either | val 19 − 6: −0.0015 [−0.0080, +0.0044]; both averaged − 6: +0.0085 [+0.0049, +0.0118] |
 | **A third backbone family adds to the ensemble when it matches c2 alone, not when it trails it.** ConvNeXt-tiny equals c2 and adds to c2+c3; EVA02-small trails c2 by 0.045 and subtracts | f1 added to c2+c3: +0.0062 [+0.0040, +0.0086]; f2: −0.0023 [−0.0047, +0.0001] |
+| **Averaging slice windows at inference is worth a third model.** Each confirm checkpoint re-read its own fold from 9 stored groups instead of 5, with nothing retrained; the 5-group read reproduced the confirm exactly | c2+c3 pooled OOF 0.8641 → 0.8686, +0.0045 [+0.0034, +0.0055]; gold +0.0109 [+0.0032, +0.0203] |
+| **ConvNeXt-tiny is confirmed as the third member.** Slightly below c2 alone on OOF, the best single config on gold, and additive to c2+c3 over five folds | added to c2+c3: +0.0038 [+0.0028, +0.0049] pooled OOF; gold 0.8945 alone |
+| **Confidence weights on the loss hurt.** Discounting studies where the label sources disagree lowered the model, as the weak prior recorded beforehand suggested | s3 minus control: −0.0089 [−0.0153, −0.0014] |
+| **336px pays as an extra member.** At matched batch it beats 224px, and next to c2+c3+f1 it adds more than one more 224px model does | 336 − 224: +0.0074 [+0.0007, +0.0146]; as a fourth member +0.0021 [+0.0006, +0.0037] against +0.0006 |
 
 **Prep v3** re-prepped all 4,407 studies into a nineteen-slot table (plane × fat-suppression ×
 {T1, PD, T2, UNK}) with 0 failures, mean 5.04 filled slots per study against a census prediction of
@@ -242,39 +256,49 @@ sample of studies pulled via the Kaggle API), never full training.
 
 ## Layout
 
-Target layout (full plan); items marked `[done]` exist today, everything else is Phase 2+:
+Layout; every module marked `[done]` exists today:
 
 ```
 src/knee/            package pushed to Kaggle as a private dataset, imported by thin notebooks
   dicom.py           [done] header scan, series/slice selection, per-header and per-study
                       laterality resolution + census, decode/normalize; also owns
                       StudyDecodeError and the slice-header read both dataset.py and
-                      prep.py need (kept here to avoid a circular import)
+                      prep.py need (kept here to avoid a circular import), the six- and
+                      nineteen-slot tables, and TR/TE weighting recovery
   prep.py            [done] normalize_series, mirror_to_canonical + mirrors_in_plane (only
                       Axial/Coronal flip), JPEG-in-.npz storage with selective decode, the
                       Phase 2 prep_study orchestrator (pad-to-square letterbox), and the
                       Phase 6 prep_slots orchestrator: crop_to_mm gives every study the same
                       physical scale, which the letterbox never did -- studies differ in
-                      mm/px by a factor of several and no downstream capacity recovers that
+                      mm/px by a factor of several and no downstream capacity recovers that.
+                      prep_slots files series under the six- or nineteen-slot table
+                      (slot_scheme), and window_groups lets a 9-group prep reproduce the
+                      5-group artifact's pixels exactly
   dataset.py         [done] KneeStudyDataset over raw DICOMs (Phase 1 shape),
                       PreppedStudyDataset over the Phase 2 .npz artifacts, and
                       PreppedSlotDataset over the Phase 6 slot artifacts -- the last
                       returns (image [slot, group, 3, H, W], presence mask, labels, uid)
                       rather than one flat slice axis, so "this study has no coronal
-                      acquisition" is expressible instead of being padded over
+                      acquisition" is expressible instead of being padded over. It reads
+                      either slot table and can yield per-label sample weights
   model.py           [done] single backbone, pooled over images; accepts either the flat
                       volume or the slot-structured one and pools only over present slots
                       (an unmasked mean averages anatomy with the black squares that
-                      absent slots arrive as). Per-diagnosis attention is the next step
+                      absent slots arrive as), or attends over slots per diagnosis
+                      (slot_attention). Absent slots never reach the backbone, which keeps
+                      them out of BatchNorm's batch statistics
   train.py           [done] masked BCE, fold assignment, one epoch, evaluate, experiment logging --
                        used for the real Phase 1 5-fold training run (notebooks/phase1-train/);
                        also Timer (accumulating wall-clock stopwatch feeding train_minutes),
                        load_gold_holdout + train_val_split (Phase 4's explicit gold exclusion --
-                       Phase 1 trained on 36 of the 58 gold studies by accident)
+                       Phase 1 trained on 36 of the 58 gold studies by accident). An epoch runs
+                       AMP, a per-step scheduler and optional gradient accumulation; the loss
+                       takes optional per-label weights, and folds can be grouped by report text
   infer.py           [done] submission writer, byte-for-byte header, 0.5 fallback
   reports.py         [done] EN/ES lexical rules (kept as a per-label fallback candidate,
                       not replaced) + the Phase 3 LLM generator: verbatim rubric,
-                      per-label criterion prompts, yes/no-logit soft scoring
+                      per-label criterion prompts, yes/no-logit soft scoring, and per-label
+                      confidence weights from agreement among label sources
   metrics.py         [done] macro AUC, per-label AUC (NaN-safe), and paired_macro_auc_delta:
                       the bootstrap 95% CI the promotion rule ("the paired delta clears
                       noise") is evaluated against, resampling studies for both arms
@@ -345,6 +369,11 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
   phase7-screen-res/   336px (batch 4 x 2 accumulated) and confidence weights on c2's config,
                         each arm paired with a control that differs in one thing and scored as a
                         fourth member next to c2+c3+f1
+  phase7-tta-f1/       the same 5-vs-9 group read for f1's five confirm checkpoints
+  phase7-submit-b/     the three-member submission kernel: one 9-group prep pass windowed on the
+                        five training groups, and all three members reading all nine
+  phase7-confirm-s2/   5-fold confirm of c2's config read at 336px (batch 4 x 2 accumulated), scored
+                        as a fourth member next to c2's, c3's and f1's own pooled OOF
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
