@@ -305,6 +305,7 @@ class PreppedSlotDataset(Dataset):
         augment: bool = False,
         weights_df: pd.DataFrame | None = None,
         label_columns: list[str] | None = None,
+        random_groups: bool = False,
     ):
         self.study_uids = list(study_uids)
         self.npz_root = Path(npz_root)
@@ -324,6 +325,10 @@ class PreppedSlotDataset(Dataset):
         self.canonical = canonical
         self.sides = sides or {}
         self.augment = augment
+        # train-time only, and its own switch rather than a side effect of
+        # augment: every screen arm trains with the affine jitter, so random
+        # windows have to be the one thing an arm changes
+        self.random_groups = random_groups
 
     def __len__(self) -> int:
         return len(self.study_uids)
@@ -352,12 +357,12 @@ class PreppedSlotDataset(Dataset):
         so this is only worth revisiting if a config actually reads fewer."""
         stored = len(slices) // SLICE_GROUP
         if stored >= self.n_groups:
-            if self.augment and stored > self.n_groups:
-                # train-time only: a random sorted subset of the stored windows,
-                # so over the epochs the model sees the in-between groups a
-                # fixed read never shows it. Eval keeps the fixed spread below,
-                # which is what lets a 5-of-9 read reproduce a 5-group confirm.
-                # torch's RNG, like augment_volume, so seeding the run seeds this.
+            if self.random_groups and stored > self.n_groups:
+                # a random sorted subset of the stored windows, so over the epochs
+                # the model sees the in-between groups a fixed read never shows
+                # it. Eval keeps the fixed spread below, which is what lets a
+                # 5-of-9 read reproduce a 5-group confirm. torch's RNG, like
+                # augment_volume, so seeding the run seeds this.
                 picks = torch.randperm(stored)[: self.n_groups].sort().values.numpy()
             else:
                 picks = np.linspace(0, stored - 1, num=self.n_groups).round().astype(int)

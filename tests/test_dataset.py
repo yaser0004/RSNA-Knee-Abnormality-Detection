@@ -618,22 +618,25 @@ def _nine_group_stack(tmp_path):
     return uid, stored["SAG_FLUID"]
 
 
-def test_select_groups_keeps_the_fixed_spread_when_not_augmenting(tmp_path):
-    # the eval read must stay deterministic: 5-of-9 reproducing the 5-group
-    # confirm is the gate every 9-group number rests on
+def test_select_groups_keeps_the_fixed_spread_unless_random_groups_is_on(tmp_path):
+    # its own switch, not a side effect of augment: every screen arm trains with
+    # the affine jitter, and random windows must be the one thing an arm changes.
+    # The eval read stays deterministic either way -- 5-of-9 reproducing the
+    # 5-group confirm is the gate every 9-group number rests on
     uid, slices = _nine_group_stack(tmp_path)
-    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8)
+    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True)
     torch.manual_seed(0)
 
     assert _group_ids(ds._select_groups(slices)) == [0, 2, 4, 6, 8]
 
 
-def test_select_groups_draws_a_random_sorted_subset_when_augmenting(tmp_path):
+def test_select_groups_draws_a_random_sorted_subset_when_random_groups_is_on(tmp_path):
     # the confirm checkpoints only ever saw groups 0,2,4,6,8 of the 9-group
     # artifact; a training read that varies the windows shows the model the
     # in-between anatomy a fixed read never does
     uid, slices = _nine_group_stack(tmp_path)
-    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True)
+    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True,
+                            random_groups=True)
 
     draws = set()
     for seed in range(20):
@@ -648,15 +651,16 @@ def test_select_groups_draws_a_random_sorted_subset_when_augmenting(tmp_path):
 def test_select_groups_takes_every_stored_group_when_none_are_spare(tmp_path):
     uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",), n_groups=5)
     stored, _ = load_study_npz(tmp_path / f"{uid}.npz", order=["SAG_FLUID"])
-    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True)
+    ds = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, random_groups=True)
 
     assert _group_ids(ds._select_groups(stored["SAG_FLUID"])) == [0, 1, 2, 3, 4]
 
 
-def test_slot_dataset_augmented_read_of_a_nine_group_artifact_has_the_training_shape(tmp_path):
+def test_slot_dataset_random_group_read_of_a_nine_group_artifact_has_the_training_shape(tmp_path):
     uid, _ = _nine_group_stack(tmp_path)
 
-    image, _, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True)[0]
+    image, _, _, _ = PreppedSlotDataset([uid], tmp_path, n_groups=5, out_size=8, augment=True,
+                                        random_groups=True)[0]
 
     assert tuple(image.shape) == (len(SLOTS), 5, SLICE_GROUP, 8, 8)
 

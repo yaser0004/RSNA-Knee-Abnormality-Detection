@@ -282,9 +282,9 @@ src/knee/            package pushed to Kaggle as a private dataset, imported by 
                       acquisition" is expressible instead of being padded over. It reads
                       either slot table, can yield per-label sample weights, reads a label
                       frame wider than the twelve columns (label_columns, for the
-                      multi-source target), and when augmenting draws a random sorted
-                      subset of the stored slice groups so training sees the windows a
-                      fixed read never shows it (eval keeps the fixed spread)
+                      multi-source target), and with random_groups draws a random sorted
+                      subset of the stored slice groups at train time so the model sees
+                      the windows a fixed read never shows it (eval keeps the fixed spread)
   model.py           [done] single backbone, pooled over images; accepts either the flat
                       volume or the slot-structured one and pools only over present slots
                       (an unmasked mean averages anatomy with the black squares that
@@ -395,6 +395,16 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
   phase8-submit-c/     the four-member submission kernel: Submission B plus s2 reading the same
                         9-group windowed artifact at its stored 336px, probability mean over twenty
                         models
+  phase8-screen-arch/  Screen A, fold 0: attention over every (slot, group) token, random training
+                        windows and EMA weights on c2's config, each pair one variable apart, every
+                        arm read at five and nine groups and scored as a fifth member next to
+                        c2+c3+f1+s2 (bar +0.0015, CI above zero)
+  phase8-screen-target/  Screen B, fold 0: the label target -- steven_v4, one head per source, and a
+                        probability blend of the three best sources -- scored against one fixed truth
+                        and on gold, never each arm against its own target
+  phase8-screen-scale/ Screen C, fold 0: DINOv2-small at 336, ConvNeXt-tiny at 336 and DINOv2-base
+                        at 224, each on its family's recipe, scored as a fifth member and against the
+                        member it would replace
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)

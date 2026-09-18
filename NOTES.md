@@ -3385,9 +3385,9 @@ the read lands.
   finding. No positional embedding yet -- a token does not know its depth -- by choice, so the screen
   measures the MIL change alone. slot_attention's eval logits are untouched (the equivalence tests
   that protect the scored checkpoints still pass).
-- Random group subsampling when augmenting: a 5-group training read of a 9-group artifact draws a
-  random sorted subset of the windows; eval keeps the fixed spread, so 5-of-9 still reproduces the
-  confirm (pinned by a test).
+- Random group subsampling (`random_groups`, its own switch so a screen arm changes one thing): a
+  5-group training read of a 9-group artifact draws a random sorted subset of the windows; eval keeps
+  the fixed spread, so 5-of-9 still reproduces the confirm (pinned by a test).
 - `ModelEma` (decay 0.999), updated once per optimizer step, never per batch, so accumulation does
   not change its window.
 - The multi-source target needs no model change: `multi_source_labels` builds a wide frame,
