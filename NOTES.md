@@ -3508,3 +3508,40 @@ models ran unchanged, s2 added a quarter-weight vote.
 Next, per the plan: the Phase 8 src (group attention, EMA, random windows, the target builders) goes
 to `rsna-knee-src` now that C's score has landed, then Screens A and B take the two GPU lanes and
 Screen C follows B.
+
+### Pre-registered rules for Screens A, B and C, written before they are pushed (2026-09-19)
+
+All fold 0 of `primary_v3`, gold held out, c2's recipe unless stated. "Member gain" means the arm added
+as a fifth member to the confirm runs' own fold-0 predictions of c2+c3+f1+s2, probability mean; **the
+bar is +0.0015 with the paired CI above zero**, the price of one more model of a known config. Nothing
+is promoted on fold 0 alone: passing a rule buys a five-fold confirm, not a place in a submission.
+
+**Screen A (`knee-phase8-screen-arch`, prep9 artifacts, fixed five groups unless stated):**
+- **a1 group attention is worth confirming** if a1 minus a0 on val has a CI excluding zero *or* a1
+  clears the member bar. a0 is the in-session control, since run-to-run noise here is ~0.0065.
+- **a2 random training windows / a3 EMA join the recipe** only if each adds to a1: a2 minus a1, and a3's
+  EMA weights minus its own raw weights (same run), each with a CI above zero. a3's raw weights minus a1
+  is reported as the measured noise floor between two runs of one config.
+- Every arm is also read at nine groups and reported; the nine-group member comparison uses all four
+  confirmed members' nine-group arrays.
+
+**Screen B (`knee-phase8-screen-target`, phase6 artifacts):** arms t0 steven_v4, t1 one head per
+source (K=4), t2 probability blend of steven_v4 + ours + lixin73.
+- **Every arm is scored against one fixed truth, steven_v4 binarised, and on gold** -- never against
+  its own target. A negative fixed-truth delta for t1/t2 is expected of a better target and is not a
+  veto.
+- **Replacement (the target itself): gold decides.** A target whose gold delta over t0 has a CI lower
+  bound above zero -- the standard c0's promotion met, +0.0339 [+0.0067, +0.0625] -- becomes the
+  target for later confirms.
+- **Member:** a target that clears the member bar on the fixed truth is confirmed as a member config
+  even when its gold delta spans zero; a model trained on a different label source is the most
+  decorrelated member available.
+- **If a target is promoted, the fixed truth switches once**, to that target binarised, and every
+  member's saved OOF arrays are re-scored against it before any later member decision.
+
+**Screen C (`knee-phase8-screen-scale`, phase6 artifacts):** s4 DINOv2-small at 336 and s6 DINOv2-base
+at 224 on c3's two-slot recipe; s5 ConvNeXt-tiny at 336 on f1's.
+- Each arm is judged by the member bar, and against the member it would replace (s4, s6 vs c3; s5 vs
+  f1) by the paired val CI.
+- **s5 gets its ~13 h confirm only if its member gain is at least +0.0030**, twice the bar. If s5 falls
+  back to batch 4 x 2 on memory, that is recorded as a second variable against f1.
