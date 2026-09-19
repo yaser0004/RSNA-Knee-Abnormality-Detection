@@ -3545,3 +3545,36 @@ at 224 on c3's two-slot recipe; s5 ConvNeXt-tiny at 336 on f1's.
   f1) by the paired val CI.
 - **s5 gets its ~13 h confirm only if its member gain is at least +0.0030**, twice the bar. If s5 falls
   back to batch 4 x 2 on memory, that is recorded as a second variable against f1.
+
+### Screen B: no new target, but the three-source blend earns a confirm as a member (2026-09-20)
+
+`knee-phase8-screen-target` (3.45 h, fold 0, c2's recipe on the phase6 artifacts, gold held out). Every
+arm scored against the fixed truth (steven_v4 binarised) and on gold:
+
+| arm | trains on | val vs steven_v4 | gold | min |
+|---|---|---|---|---|
+| t0 | steven_v4 (control) | 0.8614 | 0.8640 | 48.9 |
+| t1 | one head per source, K=4, averaged | 0.8563 | 0.8754 | 46.8 |
+| t2 | probability blend: steven_v4 + ours + lixin73 | **0.8650** | **0.8833** | 47.2 |
+
+Read by the rules registered before the push:
+
+- **Replacement -- no target is promoted.** Gold over t0: t1 +0.0114 [-0.0104, +0.0345], t2 +0.0193
+  [-0.0036, +0.0433]; both CIs span zero, so steven_v4 stays the target and **the fixed truth does not
+  switch.** t2 is the closest any target has come since c0 (+0.0339 [+0.0067, +0.0625]), and it is also
+  ahead on the fixed truth (+0.0036 [-0.0025, +0.0100]) where a better target was expected to *lose*.
+- **Member -- t2 clears the bar and is confirmed as a member config.** Added to c2+c3+f1+s2 on the fixed
+  truth: **t2 +0.0027 [+0.0016, +0.0038]**, against **+0.0017 [+0.0003, +0.0030] for t0**, one more
+  steven_v4 model trained in the same session. t1 adds +0.0010 [+0.0001, +0.0019]: CI above zero, point
+  under the bar, **not confirmed.** On gold the member gains are t2 +0.0056 [-0.0003, +0.0115], t1
+  +0.0023, t0 -0.0007: the same order, and t2's is the largest fifth-member gold gain measured.
+- **The per-source heads say something about the sources.** Inside t1, the lixin73 head alone scores
+  0.8610 against steven_v4's own truth, above the steven_v4 head (0.8563), and 0.8750 on gold; dropping
+  the pilkwang head (0.8017 / 0.8118 alone) lifts the average to 0.8607 / 0.8792. Averaging four heads
+  inside one model bought less than averaging three sources into one target.
+- **The blend has lower prevalence than steven_v4** (positive rate 0.092-0.481 against 0.181-0.587),
+  because ours and lixin73 call fewer positives; AUC does not see it, but it is why t2 is a genuinely
+  different model and not a recalibrated t0.
+
+**Next for t2:** a five-fold confirm of c2's recipe on the blend target (`knee-phase8-confirm-t2`), scored
+against the fixed truth and as a fifth member of the confirmed four, then the 5-vs-9 group read.
