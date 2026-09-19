@@ -407,6 +407,9 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
   phase8-screen-scale/ Screen C, fold 0: DINOv2-small at 336, ConvNeXt-tiny at 336 and DINOv2-base
                         at 224, each on its family's recipe, scored as a fifth member and against the
                         member it would replace
+  phase8-confirm-t2/   5-fold confirm of c2's recipe trained on the probability blend of steven_v4,
+                        ours and lixin73 -- the member config Screen B promoted -- scored against the
+                        fixed steven_v4 truth and as a fifth member next to c2, c3, f1 and s2
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
