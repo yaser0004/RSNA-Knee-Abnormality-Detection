@@ -3578,3 +3578,47 @@ Read by the rules registered before the push:
 
 **Next for t2:** a five-fold confirm of c2's recipe on the blend target (`knee-phase8-confirm-t2`), scored
 against the fixed truth and as a fifth member of the confirmed four, then the 5-vs-9 group read.
+
+### Screen A: random training windows are worth more than every member added since Phase 7 (2026-09-20)
+
+`knee-phase8-screen-arch` (4.39 h, fold 0, c2's recipe on the prep9 artifacts, gold held out). All arms
+train on the fixed five of nine stored groups -- prep v2's pixels exactly -- except a2, which draws five
+of the nine at random each epoch; every arm is read at five and at nine groups.
+
+| arm | head | train windows | EMA | val (5 / 9 groups) | gold (5 / 9) | loss | min |
+|---|---|---|---|---|---|---|---|
+| a0 | slot attention | fixed | no | 0.8569 / 0.8642 | 0.8605 / 0.8745 | 0.3814 | 44.5 |
+| a1 | group attention | fixed | no | 0.8583 / 0.8658 | 0.8602 / 0.8762 | 0.3767 | 42.5 |
+| **a2** | group attention | **random** | no | **0.8738 / 0.8778** | **0.8865 / 0.8907** | 0.4229 | 43.7 |
+| a3 raw | group attention | fixed | no | 0.8619 / 0.8690 | 0.8675 / 0.8849 | 0.3748 | 45.2 |
+| a3 EMA | group attention | fixed | yes | 0.8614 / 0.8664 | 0.8721 / 0.8810 | -- | -- |
+
+Read by the rules registered before the push:
+
+- **Random training windows are the finding: a2 minus a1 is +0.0155 [+0.0091, +0.0219] val and +0.0263
+  [+0.0055, +0.0464] gold**, both CIs excluding zero. That is the largest single-change fold-0 gain since
+  Phase 5's schedule (+0.059), and it costs nothing: the artifacts already store nine windows, the loader
+  picks five of them, and the epoch takes the same 44 minutes. **Adopted into the recipe.**
+- **Its training loss is the highest of the five (0.4229 against 0.3748-0.3814), which is what an
+  augmentation looks like.** The model can no longer memorise a fixed set of slices, so it fits its
+  training set less and its held-out set more.
+- **Group attention alone is null**: a1 minus a0 is +0.0014 [-0.0051, +0.0078] val and -0.0003 on gold.
+  It clears the member bar by a hair (+0.0016 [+0.0003, +0.0029]) but a3's raw weights minus a1 -- two
+  runs of the same config -- is +0.0036, so the noise floor here is larger than the effect. It rides
+  along in a2 rather than on its own merits.
+- **EMA does not pay**: EMA minus its own raw weights is -0.0005 [-0.0038, +0.0027] val, +0.0046 on gold,
+  both spanning zero. **Closed.**
+- **Window averaging still pays, less so for a2**: nine groups minus five is +0.0073 for a0, +0.0074 for
+  a1 and only +0.0040 for a2 -- training on random windows already teaches most of what reading nine
+  windows buys at inference, but not all of it.
+- **As a fifth member next to c2+c3+f1+s2, a2 is the strongest yet measured**: +0.0038 [+0.0025, +0.0049]
+  at five groups and +0.0029 [+0.0018, +0.0040] at nine, against +0.0007 for a0 (one more known model)
+  and +0.0027 for Screen B's t2. Gold member gains all span zero at n=58, ordered the same way.
+- **The head's windows are not uniform**: averaged over the gold studies its attention runs
+  [0.15, 0.19, 0.26, 0.24, 0.15] over the five windows -- the middle of the joint carries more than the
+  ends, which is what the 0.20-0.80 band was sampling blind.
+
+**Confirmed next:** a2's config (group attention + random windows) on five folds, trained on the prep9
+artifacts, with the five- and nine-group reads in the same session. After that, the obvious question
+Screen A raises: random windows are a training-time augmentation that nothing about the head or the
+backbone makes specific, so **re-confirming c3 and f1 with random windows** is the next candidate queue.
