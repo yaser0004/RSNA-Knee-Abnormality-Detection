@@ -3434,3 +3434,47 @@ in the multi-source arm, whose report also prints each head alone and the averag
 two final submissions can be selected** (a third attempt is refused with "you have selected the
 maximum number of submissions"). Under Kaggle's rule the better private score of the two counts, so
 the Phase 8 plan's second slot -- the gold-fine-tuned aggressive pick -- is a free hedge, not a risk.
+
+### s2 gains at nine groups too; Submission C scored offline, band registered before the push (2026-09-19)
+
+**`knee-phase8-tta-s2`** (32.9 min, pushed at the quota reset, nothing trained): s2's five confirm
+checkpoints re-read their own folds and the 58 gold studies at 336px, at 5 and at 9 groups.
+
+- **The comparison is valid.** The 5-group read reproduced the confirm exactly: macro 0.85378 against
+  0.85378, largest prediction difference 5.4e-07. Nine groups moved predictions by up to 0.60.
+- **s2, 5 -> 9 groups: +0.0084 [+0.0069, +0.0099] pooled OOF** (0.8538 -> 0.8622), CI excluding zero;
+  gold +0.0082 [-0.0016, +0.0194], spanning zero. The largest window gain of the four members (c2
+  +0.0086, f1 +0.0053, c3 +0.0052). By the rule every member has been held to, **s2 reads nine groups.**
+
+**Submission C offline** (c2+c3+f1+s2, all at nine groups, probability mean over twenty models), rows and
+labels checked identical across the four sources (`ai/scratch/phase8-submit/score_members.py s2`):
+
+| ensemble | pooled OOF | gold |
+|---|---|---|
+| Submission B (c2+c3+f1), scored 0.921 | 0.8713 | 0.9059 |
+| **Submission C (c2+c3+f1+s2)** | **0.8754** | **0.9046** |
+
+- **Against B: +0.0041 [+0.0033, +0.0049] pooled OOF**, CI excluding zero, and higher on all twelve
+  labels (largest: Lateral Meniscus +0.0118, PF OA +0.0096, ACL +0.0092). **Gold -0.0013 [-0.0056,
+  +0.0031]**, spanning zero: seven labels up, five down, none by more than 0.011.
+- **Per-label blend weights at four members: +0.0002 [-0.0005, +0.0010]** under the fold-rotated CV,
+  spanning zero. The plain probability mean stays, as at three members.
+
+**Pre-registered band for Submission C, written before it is pushed.** Five gold -> LB pairs so far
+(+0.038, +0.016, +0.026, +0.024, +0.015). B moved the LB +0.005 for +0.0072 pooled OOF, about 70% of the
+OOF delta. Applied to C's +0.0041 that is **+0.003**. Scaled from n=4,349 to the ~390 public studies the
+OOF CI widens about 3.3x, to roughly +/-0.003. The gold tier says -0.001 with its own CI spanning zero.
+
+| LB | reading |
+|---|---|
+| **0.917 or below** | **something is broken on the test path.** C is B plus one member of c2's family; four points under B is outside both tiers. Check the log first: the s2 read at 336, members skipped, fallbacks, slot fill |
+| **0.918 - 0.921** | **flat. s2's gold delta spans zero, so a flat LB is consistent with the measurement** -- it says the OOF gain did not reach the public 390, not that anything broke. s2 stays a member; members are decided on pooled OOF, never on one LB read |
+| **0.922 - 0.925** | **expected**: the OOF delta transferring at the rate B's did |
+| 0.926 - 0.929 | better than the delta method predicts; within the offset method's reach (gold 0.9046 + 0.015 to 0.024) |
+| **0.930 or above** | implausible from one more c2-family member; check for a leak or a mis-scored file before believing it |
+
+C runs on the published `rsna-knee-src` (commit c5bfa38, byte-identical to what Submission B scored on
+and to what the tta kernels used). The Phase 8 src -- group attention, EMA, random windows, the target
+builders -- stays unpublished until C's score lands, so Kaggle's rerun on the hidden set sees the code C
+was built for. Expected inference on T4: ~10 s/study for twenty models, ~3.7 h over ~1,300 hidden
+studies, inside the 6 h budget; the kernel log states the measured rate on the visible studies.
