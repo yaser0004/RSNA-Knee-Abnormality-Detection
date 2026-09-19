@@ -3489,3 +3489,22 @@ cell ran; that wall time counts toward the limit too, and it is why this kernel 
 **C is B plus s2, exactly.** On the three visible studies C differs from B by a mean 0.016 (max 0.069),
 and backing out 4C - 3B gives a valid probability for s2 on every entry (0.005 to 0.973): B's fifteen
 models ran unchanged, s2 added a quarter-weight vote.
+
+### Submission C scored 0.925, the top of its expected row (2026-09-19)
+
+**0.925** (submission 56360159), up from 0.921. On the 16:34 UTC board (3,994 teams, median 0.914, 1st
+0.957) that is **rank 1,712**. It landed in the registered **expected** row (0.922-0.925), at its top.
+
+- **The OOF delta transferred in full this time.** C over B: +0.004 on the LB for +0.0041 pooled OOF --
+  about 100%, against B's ~70%. The gold tier's -0.0013 [-0.0056, +0.0031] was, as its CI said, noise:
+  a fourth member that pooled OOF (n=4,349) favoured and 58 studies could not resolve did move the
+  public 390. That is the case for deciding members on pooled OOF, now observed on the LB once.
+- **Gold -> LB offset +0.020** (0.9046 -> 0.925), the sixth pair after +0.038, +0.016, +0.026, +0.024,
+  +0.015 -- it did not keep shrinking, which puts the offset method's reading of "LB 0.955 needs gold
+  ~0.945" at about gold 0.935 to 0.940 on the last three offsets.
+- The run held: 0 fallbacks and 0 skipped members on the visible studies; the hidden-set rerun
+  completed in its window.
+
+Next, per the plan: the Phase 8 src (group attention, EMA, random windows, the target builders) goes
+to `rsna-knee-src` now that C's score has landed, then Screens A and B take the two GPU lanes and
+Screen C follows B.

@@ -32,7 +32,9 @@ two-config ensemble (pooled OOF **+0.0156 [+0.0136, +0.0175]** over c2 alone) wa
 prep v3's nineteen-slot table was screened and tied the six-slot one, while averaging slice windows
 at inference and ConvNeXt-tiny as a third member each measured as a gain; Submission B combined
 them and scored **0.921** (rank 1,789 of 3,959 on 2026-09-18), at the floor of its pre-registered band;
-c2's config read at 336px is confirmed as a fourth member (pooled OOF +0.0042 [+0.0033, +0.0051]);
+c2's config read at 336px is confirmed as a fourth member (pooled OOF +0.0042 [+0.0033, +0.0051])
+and read at nine groups joined the others in Submission C, which scored **0.925** (rank 1,712 of
+3,994 on 2026-09-19), the top of its pre-registered expected row;
 **Phase 8** now targets the 0.95 cluster — plan in `ai/plans/2026-09-19-phase8-win-plan.md`, findings
 in `NOTES.md` from 2026-09-19.**
 
