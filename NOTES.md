@@ -3478,3 +3478,14 @@ and to what the tta kernels used). The Phase 8 src -- group attention, EMA, rand
 builders -- stays unpublished until C's score lands, so Kaggle's rerun on the hidden set sees the code C
 was built for. Expected inference on T4: ~10 s/study for twenty models, ~3.7 h over ~1,300 hidden
 studies, inside the 6 h budget; the kernel log states the measured rate on the visible studies.
+
+**Submitted** as 56360159 from `knee-phase8-submit-c` version 1 (2026-09-19 13:23 UTC), after the band
+above. Its log before submitting: the src guard passed on the published c5bfa38 src, **20 checkpoints
+across four members** (s2 at 336px, every member at nine groups), **0 of 3 on the 0.5 fallback, 0
+members skipped**, slot fill (4, 4, 5) as in A and B. **8.06 s/study on T4** (prep 3.5, forward 4.5),
+so ~2.9 h over ~1,300 hidden studies. Kaggle spent 39 minutes starting the session before the first
+cell ran; that wall time counts toward the limit too, and it is why this kernel looked stuck.
+
+**C is B plus s2, exactly.** On the three visible studies C differs from B by a mean 0.016 (max 0.069),
+and backing out 4C - 3B gives a valid probability for s2 on every entry (0.005 to 0.973): B's fifteen
+models ran unchanged, s2 added a quarter-weight vote.
