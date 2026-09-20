@@ -3778,3 +3778,29 @@ drawn at random each epoch, read at five and nine groups in the same session, go
 
 Against Submission C: **+0.0045 [+0.0039, +0.0051] pooled OOF**, CI excluding zero; gold +0.0033
 [-0.0007, +0.0077], spanning zero as every four-to-six-member gold delta has.
+
+### Pre-registered band for Submission D, written before it is pushed (2026-09-21)
+
+Six members, thirty models, all at nine groups. **What is known.** Two OOF -> LB pairs at this
+resolution: B 0.8713 -> 0.921 and C 0.8754 -> 0.925, i.e. **the last +0.0041 of pooled OOF moved the
+LB +0.004, a full-rate transfer.** D is +0.0045 over C on OOF [+0.0039, +0.0051] and +0.0033 on gold.
+Offset method: gold 0.9078 plus the last two offsets (+0.015, +0.020) gives 0.923-0.928; delta method
+at C's rate gives 0.929-0.930.
+
+| LB | reading |
+|---|---|
+| **0.921 or below** | **broken.** D is C plus two members each measured at +0.0028 with CIs excluding zero; four points under C is outside both tiers. Check the log's member-skip and fallback counts, and that a2 loaded with the group-token head |
+| 0.922 - 0.924 | the gains did not transfer: the two new members correlate with the old four more on the hidden set than on our folds |
+| 0.925 - 0.928 | partial transfer, the offset method's range |
+| **0.929 - 0.931** | **expected**, the delta method at the rate C transferred |
+| 0.932 or above | better than both methods. Plausible rather than suspicious here -- random windows are an augmentation, so it is the one change that could help *more* on a hidden set than on our own folds -- but check the fallback count before believing it |
+
+**What it is not.** Even the top of that band is below the 0.936 fork spike (315 teams) and well below
+0.942. The levers left in the phase -- random windows on c3 and f1 (Screen D, running), the blend
+target on more members, seeds of the confirmed six -- are worth perhaps +0.005 to +0.010 more on OOF.
+
+Dry run: all six members load with their own head, slots, read size and group count (the four already
+scored in C, plus t2 and a2 checked end to end on the local sample -- 7 GB of RAM cannot hold thirty
+models, so the four were dropped for that pass rather than re-validated). 0 members skipped, header
+and range checks pass. Expected inference: C ran 20 models at 8.06 s/study, so thirty at ~10.5 s/study
+is ~3.8 h over ~1,300 hidden studies, inside the 6 h budget.
