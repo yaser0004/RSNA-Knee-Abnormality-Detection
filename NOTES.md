@@ -3712,3 +3712,33 @@ member to c2+c3+f1+s2+t2; the bar stays **+0.0015 with the paired CI above zero*
   blend-trained models against steven_v4 is *conservative* -- it biases against the newer target rather
   than for it, and t2 cleared that bias anyway. The earlier rule's concern (that a promoted target's
   models would be judged on the old target's home turf) is real but points the safe way.
+
+### t2 gains most of all from nine windows; five members reach 0.8781 (2026-09-21)
+
+`knee-phase8-tta-t2` (28.7 min). Both gates passed: the five-group read reproduced the confirm
+**exactly** (macro 0.85627 against 0.85627, max prediction difference 0.00e+00 -- the first member to
+match to the bit, because t2 trains and evaluates on the same phase6 pixels the prep9 fixed five
+reproduce), and nine groups moved predictions by up to 0.57.
+
+| member | pooled OOF, 5 -> 9 | gold, 5 -> 9 |
+|---|---|---|
+| **t2** | 0.8563 -> **0.8654**, **+0.0091 [+0.0075, +0.0108]** | 0.8872 -> 0.8991, +0.0120 [+0.0040, +0.0212] |
+| c2 | +0.0086 | +0.0147 |
+| s2 | +0.0084 | +0.0082 |
+| f1 | +0.0053 | +0.0020 |
+| c3 | +0.0052 | +0.0029 |
+
+**t2 gains the most of any member from window averaging, and is the only one whose gold CI also
+excludes zero.** At nine groups it is the best single member by a wide margin: 0.8654 against s2's
+0.8622, c2's 0.8571, c3's 0.8543 and f1's 0.8495.
+
+**Five members at nine groups, scored offline** (`ai/scratch/phase8-submit/score_members.py +t2`):
+
+| set | pooled OOF | gold |
+|---|---|---|
+| Submission C: c2+c3+f1+s2 | 0.8754 | 0.9046 |
+| **+ t2** | **0.8781** | **0.9061** |
+
++0.0027 [+0.0023, +0.0032] OOF, CI excluding zero; gold +0.0015 [-0.0029, +0.0056]. Eleven of twelve
+labels improve on OOF (Effusion unchanged); on gold, Synovitis (-0.013) and Lateral OA (-0.006) give
+back a little. **a2 joins as the sixth member when its confirm lands**, and Submission D follows.
