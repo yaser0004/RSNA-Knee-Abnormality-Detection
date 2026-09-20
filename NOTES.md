@@ -3742,3 +3742,39 @@ excludes zero.** At nine groups it is the best single member by a wide margin: 0
 +0.0027 [+0.0023, +0.0032] OOF, CI excluding zero; gold +0.0015 [-0.0029, +0.0056]. Eleven of twelve
 labels improve on OOF (Effusion unchanged); on gold, Synovitis (-0.013) and Lateral OA (-0.006) give
 back a little. **a2 joins as the sixth member when its confirm lands**, and Submission D follows.
+
+### a2 confirmed: random windows hold over five folds, and the six-member set reaches 0.8799 (2026-09-21)
+
+`knee-phase8-confirm-a2` (5.67 h, five folds of `primary_v3`, group attention + five of nine windows
+drawn at random each epoch, read at five and nine groups in the same session, gold excluded everywhere).
+
+| fold | val (5 / 9 groups) | gold (5 / 9) | loss | min |
+|---|---|---|---|---|
+| 0 | 0.8683 / 0.8750 | 0.8802 / 0.8859 | 0.4239 | 50.8 |
+| 1 | 0.8569 / 0.8669 | 0.8895 / 0.8979 | 0.4171 | 48.4 |
+| 2 | 0.8591 / 0.8652 | 0.8744 / 0.8968 | 0.4163 | 48.0 |
+| 3 | 0.8716 / 0.8802 | 0.8871 / 0.8945 | 0.4186 | 48.3 |
+| 4 | 0.8599 / 0.8678 | 0.8962 / 0.9076 | 0.4207 | 47.5 |
+| **pooled / gold mean** | **0.8625 / 0.8704** | **0.8983 / 0.9067** | | |
+
+- **a2 minus c2: +0.0140 [+0.0110, +0.0171] pooled OOF and +0.0189 [+0.0027, +0.0360] gold** at five
+  groups, both CIs excluding zero. Screen A predicted +0.0155 on one fold; five folds say +0.0140.
+  **The single largest per-model gain this project has measured since Phase 5's schedule**, from an
+  augmentation that costs nothing.
+- **The best member on both tiers**: at nine groups 0.8704 OOF (t2 0.8654, s2 0.8622, c2 0.8571) and
+  0.9067 gold (t2 0.8991, f1 0.8964).
+- **Added to c2+c3+f1+s2: +0.0028 [+0.0023, +0.0033]** at five groups and the same at nine, CI
+  excluding zero; gold +0.0031 [-0.0004, +0.0074].
+- Its nine-group gain is +0.0079, still large despite training on random windows, and its largest
+  per-study prediction change between reads was 0.42-0.78 on every fold.
+
+**Submission D, scored offline** (rows and labels checked identical across all six members):
+
+| set, all at nine groups | pooled OOF | gold |
+|---|---|---|
+| Submission C: c2+c3+f1+s2 (scored 0.925) | 0.8754 | 0.9046 |
+| + t2 | 0.8781 | 0.9061 |
+| **+ a2 = Submission D** | **0.8799** | **0.9078** |
+
+Against Submission C: **+0.0045 [+0.0039, +0.0051] pooled OOF**, CI excluding zero; gold +0.0033
+[-0.0007, +0.0077], spanning zero as every four-to-six-member gold delta has.
