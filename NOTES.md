@@ -3655,3 +3655,36 @@ from every split).
   steven_v4, one fold -- is now the first candidate for next week's quota.
 - **Still to do for Submission D:** t2 trained and was scored at five groups, while every other member
   reads nine. Its 5-vs-9 read (`knee-phase8-tta-t2`) is built and waits for a lane.
+
+### Screen C: scaling the other families up pays nothing, and the 336 gain was efficientnet's alone (2026-09-21)
+
+`knee-phase8-screen-scale` (6.81 h, fold 0, phase6 artifacts, each arm on its family's recipe, gold held
+out). All three arms fit batch 8 with gradient checkpointing, so none needed the accumulation fallback.
+
+| arm | backbone | val | gold | peak GPU | min |
+|---|---|---|---|---|---|
+| s4 | DINOv2-small at 336, c3's 2-slot recipe | 0.8541 | 0.8529 | 2.2 GB | 67.6 |
+| s5 | ConvNeXt-tiny at 336, f1's 6-slot recipe | 0.8439 | 0.8553 | 8.8 GB | 166.2 |
+| s6 | DINOv2-base at 224, c3's 2-slot recipe | 0.6352 | 0.6216 | 2.7 GB | 71.2 |
+
+**None clears the member bar; none is confirmed.**
+
+- **s4: 336 does nothing for DINOv2.** Against c3's own fold-0 predictions it is -0.0011 [-0.0074,
+  +0.0050] and as a fifth member +0.0000 [-0.0011, +0.0012]. The +0.0053 that 336 bought efficientnet
+  (s2, confirmed) **did not generalise to the other family**: a patch-14 ViT at 336 sees 576 patches
+  instead of 256, but its position embedding is interpolated away from what it was pretrained at, and
+  the two effects appear to cancel.
+- **s5: ConvNeXt at 336 is worse than at 224**, -0.0077 [-0.0144, -0.0010] val and -0.0334 [-0.0595,
+  -0.0106] gold against f1, both CIs excluding zero, for 2.4x the training time (166 min against f1's
+  70). The most expensive arm this project has run and the clearest loss.
+- **s6: DINOv2-base did not train.** val 0.6352, -0.2200 against c3. Its 86M parameters on c3's
+  differential rates (8e-6 backbone / 1e-3 head) over 3,486 studies is the EVA02 situation again:
+  nothing here separates "the model is wrong for the task" from "the recipe is wrong for the model".
+  **Not pursued** -- the diversity a third ViT would add is already covered, and the two prior attempts
+  at a bigger or differently-pretrained transformer (EVA02-small, now DINOv2-base) both failed the same
+  way, which is itself the finding: on 3,486 studies the small backbones are not the binding constraint.
+
+**What the phase's three screens say together.** Capacity and resolution are exhausted for every family
+but efficientnet; the gains left are in **what the model is trained on** (Screen B's blend target,
++0.0029 as a member) and **how the data is presented** (Screen A's random windows, +0.0038). Both are
+free. That is where the remaining quota goes.
