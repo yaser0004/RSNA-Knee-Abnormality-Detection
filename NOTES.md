@@ -3622,3 +3622,36 @@ Read by the rules registered before the push:
 artifacts, with the five- and nine-group reads in the same session. After that, the obvious question
 Screen A raises: random windows are a training-time augmentation that nothing about the head or the
 backbone makes specific, so **re-confirming c3 and f1 with random windows** is the next candidate queue.
+
+### t2 confirmed: the blend target trains the best single member yet, and beats c2 on c2's own truth (2026-09-21)
+
+`knee-phase8-confirm-t2` (4.44 h, five folds of `primary_v3`, c2's recipe trained on the probability
+blend of steven_v4 + ours + lixin73, scored against the fixed truth steven_v4 binarised, gold excluded
+from every split).
+
+| fold | val macro | gold |
+|---|---|---|
+| 0 | 0.8633 | 0.8830 |
+| 1 | 0.8491 | 0.8633 |
+| 2 | 0.8552 | 0.8656 |
+| 3 | 0.8652 | 0.8693 |
+| 4 | 0.8515 | 0.8630 |
+| **pooled OOF (n=4,349) / gold 5-fold mean** | **0.8563** | **0.8872** |
+
+**The best single member measured on pooled OOF** -- c2 0.8485, c3 0.8491, f1 0.8442, s2 0.8538, t2
+**0.8563** -- and second on gold behind f1's 0.8945.
+
+- **t2 minus c2: +0.0078 [+0.0044, +0.0113] pooled OOF**, CI excluding zero. Read carefully: both are
+  scored against **steven_v4 binarised**, which is the *control's* training target and the challenger's
+  home disadvantage. The blend-trained model wins on the control's own turf, over 4,349 studies. Gold
+  agrees in direction (+0.0078) and cannot resolve it (CI spanning zero, as at n=58 it never can).
+- **As a fifth member: +0.0029 [+0.0023, +0.0034] pooled OOF**, CI excluding zero, against the screen's
+  +0.0027 -- a fold-0 screen predicting a five-fold confirm almost exactly, which has not happened
+  before on this project. Gold +0.0027 [-0.0022, +0.0080], spanning zero. **Promoted as a member.**
+- The rule registered before Screen B stands: the *target* did not switch, because the switch was
+  pre-registered on gold and gold cannot resolve it. But this confirm is the strongest evidence yet
+  that the blend is a better training target and not merely a decorrelated one, and the cheap
+  experiment that would settle it -- a2's config trained on the blend against a2's config trained on
+  steven_v4, one fold -- is now the first candidate for next week's quota.
+- **Still to do for Submission D:** t2 trained and was scored at five groups, while every other member
+  reads nine. Its 5-vs-9 read (`knee-phase8-tta-t2`) is built and waits for a lane.
