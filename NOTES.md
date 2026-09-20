@@ -3688,3 +3688,27 @@ out). All three arms fit batch 8 with gradient checkpointing, so none needed the
 but efficientnet; the gains left are in **what the model is trained on** (Screen B's blend target,
 +0.0029 as a member) and **how the data is presented** (Screen A's random windows, +0.0038). Both are
 free. That is where the remaining quota goes.
+
+### Pre-registered rules for Screen D, written before it is pushed (2026-09-21)
+
+`knee-phase8-screen-windows`, fold 0, prep9 artifacts, gold held out. Four arms, each trained on five
+of the nine stored windows drawn at random: **d1** c3's two-slot DINOv2 config, **d2** f1's six-slot
+ConvNeXt config, **d3** a2's config on the three-source blend, **d4** a2's config on steven_v4 (d3's
+in-session control and a second read of a2's fold 0). "Member gain" is now the arm added as a **sixth**
+member to c2+c3+f1+s2+t2; the bar stays **+0.0015 with the paired CI above zero**.
+
+- **d1 / d2 are worth confirming** if the arm minus its own confirm's fold-0 predictions has a val CI
+  excluding zero, *or* if it clears the member bar. Pairing against the confirms rather than a fresh
+  control is licensed by Screen A: its a0 arm (c2, fixed windows, prep9 artifacts) scored 0.8569 against
+  c2's confirm fold-0 0.8571, so training on the fixed five of nine reproduces the phase6 training.
+- **d3 minus d4 settles the target** on 863 studies where gold's 58 could not. The blend becomes the
+  training target for later confirms if that val CI excludes zero. Both arms are scored against the
+  fixed truth, steven_v4 binarised, which is d4's own training target -- so a d3 win is measured against
+  the control's home advantage, as t2's +0.0078 already was.
+- **Amendment to the rule registered before Screen B, stated now and before the result:** the fixed
+  truth **stays steven_v4 binarised for the rest of Phase 8 even if the blend is promoted as the
+  training target.** Two reasons. Every member's saved OOF arrays are scored against it, so switching
+  would mean rescoring all of them and would break comparability with Submissions A-C; and scoring
+  blend-trained models against steven_v4 is *conservative* -- it biases against the newer target rather
+  than for it, and t2 cleared that bias anyway. The earlier rule's concern (that a promoted target's
+  models would be judged on the old target's home turf) is real but points the safe way.

@@ -410,6 +410,9 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
   phase8-confirm-t2/   5-fold confirm of c2's recipe trained on the probability blend of steven_v4,
                         ours and lixin73 -- the member config Screen B promoted -- scored against the
                         fixed steven_v4 truth and as a fifth member next to c2, c3, f1 and s2
+  phase8-screen-windows/  Screen D, fold 0: random training windows on c3's and f1's configs, and
+                        a2's config trained on the blend against steven_v4 -- the target question
+                        gold could not resolve, asked on 863 studies
   phase8-tta-t2/       the 5-vs-9 group read for t2's five confirm checkpoints, so the blend-target
                         member reads nine windows like the other four in Submission D
   phase8-confirm-a2/   5-fold confirm of the config Screen A promoted: per-diagnosis attention over
