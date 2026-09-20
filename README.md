@@ -419,6 +419,9 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
                         every (slot, group) token, trained on five of the nine stored windows drawn
                         at random each epoch. Reads five and nine groups in the same session, so it
                         needs no separate TTA kernel, and saves its arrays under both conventions
+  phase8-confirm-d3/   5-fold confirm of Phase 8's two findings together: a2's config (group-token
+                        attention, random windows) trained on the blend target Screen D promoted,
+                        read at five and nine groups, scored as a seventh member
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)

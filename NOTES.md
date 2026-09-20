@@ -3841,3 +3841,11 @@ Read by the rules registered before the push:
 **Queue for the next quota window (Sat 00:00 UTC):** Submission D (built, banded, awaiting the user's
 confirmation), then d3's five-fold confirm (~5.7 h, both reads in one session), then seeds of the best
 configs, then Submission E.
+
+**d3's confirm kernel is built but not yet dry-run (2026-09-21).** The dev box is out of memory: swap
+is 6.3 of 7.3 GB used and `earlyoom` kills python at ~1.4 GB RSS, so even the 64px batch-1 patch dies
+at exit 143 (twice, also with `OMP_NUM_THREADS=1 MALLOC_ARENA_MAX=2`). The kernel is two swaps away
+from two kernels that have both run on Kaggle -- the a2 confirm (same gate, folds, random windows,
+dual read, array naming) and the t2 confirm (same blend-target training frame) -- and it cannot be
+pushed before the quota reset anyway, so the dry run is deferred rather than skipped. **It runs before
+the push.**
