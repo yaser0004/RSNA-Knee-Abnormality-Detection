@@ -3804,3 +3804,40 @@ scored in C, plus t2 and a2 checked end to end on the local sample -- 7 GB of RA
 models, so the four were dropped for that pass rather than re-validated). 0 members skipped, header
 and range checks pass. Expected inference: C ran 20 models at 8.06 s/study, so thirty at ~10.5 s/study
 is ~3.8 h over ~1,300 hidden studies, inside the 6 h budget.
+
+### Screen D: the blend target wins on 863 studies, random windows do not carry, and a better model is not a better member (2026-09-21)
+
+`knee-phase8-screen-windows` (5.68 h, fold 0, prep9 artifacts, every arm trained on five of nine
+windows drawn at random, gold held out).
+
+| arm | val (5 / 9 groups) | gold (5 / 9) | loss | min |
+|---|---|---|---|---|
+| d1 c3 + random windows | 0.8536 / 0.8582 | 0.8768 / 0.8846 | 0.4703 | 20.3 |
+| d2 f1 + random windows | 0.8589 / 0.8628 | 0.8802 / 0.8811 | 0.4620 | 57.4 |
+| **d3 a2's config on the blend** | **0.8829 / 0.8884** | **0.8946 / 0.9012** | 0.3532 | 46.8 |
+| d4 a2's config on steven_v4 | 0.8718 / 0.8779 | 0.8898 / 0.8985 | 0.4206 | 45.0 |
+
+Read by the rules registered before the push:
+
+- **The target question is settled where gold could not settle it: d3 minus d4 is +0.0111 [+0.0059,
+  +0.0165] val**, same config, same session, CI excluding zero -- and measured against **steven_v4's own
+  binarised labels**, the control's home turf. Gold agrees in direction (+0.0049) and spans zero at n=58,
+  as it has every time. **The three-source blend is the training target for every later confirm.** The
+  fixed truth stays steven_v4 binarised, per the amendment registered before this ran.
+- **Random windows do not carry to the other families.** d1 minus c3's own confirm fold-0 is -0.0016
+  [-0.0073, +0.0046] -- nothing for the two-slot mean-pool DINOv2. d2 minus f1's is +0.0073 [+0.0019,
+  +0.0123], a real gain for ConvNeXt, and its training loss rose (0.4620 against f1's ~0.39), so the
+  augmentation bit.
+- **But a better model is not a better member, measured offline on the same fold:** d2 **replacing** f1
+  inside the six gives **+0.0002 [-0.0007, +0.0010]** and added as a seventh **+0.0000**. Its +0.0073
+  of extra accuracy is entirely in errors the other five members already cover. **d2 does not get its
+  ~7 h confirm.** This is the cleanest example yet of why members are judged by marginal gain and never
+  by their own macro -- c3 taught the same lesson from the other direction in Phase 6 (worst single
+  model, best partner).
+- **d3 is the new best config anywhere on this project**: fold-0 val 0.8829 at five groups and 0.8884 at
+  nine, against a2's 0.8718 / 0.8779 and c2's 0.8571. As a **seventh member it adds +0.0025 [+0.0019,
+  +0.0032]**, and replacing a2 it adds +0.0020 -- so it joins rather than replaces. **Confirmed next.**
+
+**Queue for the next quota window (Sat 00:00 UTC):** Submission D (built, banded, awaiting the user's
+confirmation), then d3's five-fold confirm (~5.7 h, both reads in one session), then seeds of the best
+configs, then Submission E.
