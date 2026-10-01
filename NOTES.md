@@ -3881,3 +3881,30 @@ third-party pickled data, and nothing in the audit needs it opened.
 **Blending rule:** equal weight between the public compliant stack and our ensemble, per-label rank
 mean. Other teams' weights saw our validation studies, so no OOF exists for them on our folds; any
 fitted weight would be tuned on 390 public studies (+/-0.003 noise).
+
+### Phase 9: the compliant public stack (P) is built; band registered before it is pushed (2026-10-01)
+
+`notebooks/phase9-public-stack/` is the 0.943 public pipeline (`jiweiliu/rsna-knee-fast-2xt4-inference`)
+with Stage 2 (A5, DINOv3-derived) and Stage 3 (RadImageNet heads) cut out, built by
+`ai/scratch/phase9-public/build_p.py` as asserted text swaps (a changed parent fails the build). What
+is left: DINOv2-small x20, Raptor CoAtNet x4 views, four CoAtNet readers, the parent's own 60/40
+CoAt/Raptor-vs-base outer blend. Static check: pyflakes finds no undefined name the parent did not
+already have, and the stage-file hand-off (DINO writes `_pipeline_stage.csv`, the Raptor/CoAt stage
+reads it) is intact. It cannot be run locally (CoAtNet-384 x several, 7 GB RAM), so its first run is
+the Kaggle GPU kernel itself.
+
+`notebooks/phase9-submit-blend/` runs P, then our Submission D code unchanged as a subprocess, then a
+per-label rank mean at equal weight (`ai/scratch/phase9-public/build_blend.py`; blend cell tested on
+synthetic files, including the "ours failed, submit P alone" path and a study-set-mismatch raise).
+
+**Pre-registered band for P alone.** The full stack scores 0.943; P removes the DINOv3 member and the
+RadImageNet heads, which fed the base half of the parent's outer blend, and leaves the CoAt half at its
+fixed 0.60 weight, tuned by others for the full stack.
+
+| LB | reading |
+|---|---|
+| 0.925 or below | broken or the cut members carried the stack. Check the log first: DINO 20/20 gate, CoAt readers that ran, fallback count |
+| 0.926 - 0.932 | the compliant core is much weaker than the full stack; the blend with ours matters more |
+| **0.933 - 0.941** | **expected** |
+| 0.942 - 0.943 | the cut members carried nothing |
+| 0.944 or above | implausible for a strict subset; check for a leak or a mis-scored file |
