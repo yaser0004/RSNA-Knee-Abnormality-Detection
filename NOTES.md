@@ -3992,3 +3992,11 @@ differential 5e-5 backbone / 1e-3 head.
   here does not say CoAtNet cannot help; it says this size at this resolution on this label target does
   not. A null closes only this arm; the next step then is the larger variant, not abandoning the family.
 - Time budget 9 h; peak memory and minutes per epoch printed per arm.
+
+**Screen E, first pushes (2026-10-01).** Version 1 died in its first cell (my header edit dropped the
+imports; no GPU spent). Version 2 ran the full setup, then **ran out of memory in the first forward at
+batch 4** (CoAtNet-1 over ~100 images per step with no gradient checkpointing, 14.5 of 14.56 GiB in use).
+Version 3 trains at **batch 1 x 8 accumulated** (the optimizer still steps on 8 studies); BatchNorm in the
+conv stages sees the ~30 images of one study per call, as it does at batch 4. Gradient checkpointing was
+not used because the conv stages carry BatchNorm and a recomputed forward updates its running statistics
+twice. Rules unchanged.
