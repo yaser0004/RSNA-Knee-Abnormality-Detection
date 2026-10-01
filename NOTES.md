@@ -3925,3 +3925,28 @@ expected row was 0.929-0.931.
   on the LB each. The gap to 0.943 cannot come from there. Phase 9's weight shifts to the blend with
   the compliant public stack, where the models are different in kind (CoAtNet, different labels,
   different pixel pipeline), and to whatever P itself scores.
+
+### d3 confirmed: the best single member yet, and a seventh member above the bar (2026-10-01)
+
+`knee-phase8-confirm-d3` (4.5 h training, five folds of `primary_v3`, a2's config -- group attention, five of
+nine windows at random -- trained on the three-source blend, scored against the fixed truth steven_v4
+binarised, gold excluded from every split). Both reads in one session.
+
+| | pooled OOF (n=4,349) | gold (n=58) |
+|---|---|---|
+| d3, 5 groups | 0.8710 | 0.9078 |
+| **d3, 9 groups** | **0.8781** | **0.9106** |
+
+- **Best single member on pooled OOF** (a2 0.8704, t2 0.8654, s2 0.8622 at nine groups).
+- **d3 minus a2 (the blend target alone): +0.0077 [+0.0051, +0.0102]** at nine groups, CI excluding zero,
+  measured on steven_v4's own binarised labels -- a2's training target. Screen D's single-fold +0.0111
+  held over five folds.
+- **Added to the six members: +0.0021 [+0.0019, +0.0024] at nine groups**, over the +0.0015 bar with the CI
+  above zero; gold +0.0014 [-0.0013, +0.0048], spanning zero as every member's gold delta has.
+  **Promoted as the seventh member.** Nine groups minus five: +0.0071 [+0.0059, +0.0083].
+- The gain per added member is shrinking (+0.0045 for t2+a2 together, +0.0021 for d3) and Submission D
+  showed what it is worth on the public LB (+0.001). d3 enters the next submission as a member, not as a
+  forecast of a jump.
+
+Checkpoints and arrays in `checkpoints/knee-phase8-confirm-d3/`; six rows appended to
+`results/experiments.csv`.
