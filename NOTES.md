@@ -3908,3 +3908,20 @@ fixed 0.60 weight, tuned by others for the full stack.
 | **0.933 - 0.941** | **expected** |
 | 0.942 - 0.943 | the cut members carried nothing |
 | 0.944 or above | implausible for a strict subset; check for a leak or a mis-scored file |
+
+### Submission D scored 0.926, the "partial transfer" row; our own ensemble has stopped moving the LB (2026-10-01)
+
+**0.926** (submission 56754187, six members, thirty models, 10.2 s/study on the visible run, 0 fallbacks,
+0 members skipped). Registered band: 0.925-0.928 "partial transfer, the offset method's range"; the
+expected row was 0.929-0.931.
+
+- **+0.001 on the LB for +0.0045 pooled OOF** [+0.0039, +0.0051]: about a fifth of the OOF delta. C
+  transferred in full (+0.004 for +0.0041) and B at ~70%, so the rate is falling as members are added to
+  an ensemble that already carries the same signal. Gold -> LB offset is +0.018 (0.9078 -> 0.926).
+- **Reading:** the two new members (t2, a2) correlate with the old four more on the public ~390 than on
+  our folds, which is the band's own 0.922-0.924 explanation applied weakly. The pooled OOF is still the
+  right metric for membership; it is not a forecast of the LB at this density.
+- **Consequence for the plan:** more members and seeds of our own ensemble are worth perhaps +0.001-0.002
+  on the LB each. The gap to 0.943 cannot come from there. Phase 9's weight shifts to the blend with
+  the compliant public stack, where the models are different in kind (CoAtNet, different labels,
+  different pixel pipeline), and to whatever P itself scores.
