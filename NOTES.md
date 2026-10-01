@@ -3950,3 +3950,24 @@ binarised, gold excluded from every split). Both reads in one session.
 
 Checkpoints and arrays in `checkpoints/knee-phase8-confirm-d3/`; six rows appended to
 `results/experiments.csv`.
+
+### P scored 0.938, inside its band; blend-e's band registered before it is submitted (2026-10-01)
+
+**P, the licence-compliant public stack alone: 0.938** (submission 56754867; DINOv2 x20 + Raptor x4 views +
+four CoAtNet readers, RadImageNet and the DINOv3-derived A5 removed). Registered band 0.933-0.941
+"expected"; the full 0.943 stack loses about 0.005 for the cut members. P is **0.012 above Submission D
+(0.926)**, our best own-ensemble score, and costs 275 s on the visible run. Rank on the 2026-10-01
+board: ~1,760 (0.938), behind 277 teams at 0.936... i.e. past the 0.936 spike, below the 0.943 one.
+
+**blend-e** (`phase9-submit-blend-e`) = P and Submission E (D + d3, seven members, 35 models) at equal weight,
+per-label rank mean. Log verified: 35 models, 0 fallbacks, 0 skipped, public half COMPLETE. The two stacks
+are different in kind (CoAtNet at 384 on public labels versus six-slot EfficientNet/DINOv2/ConvNeXt on a
+three-source blend), but equal weight gives the weaker stack (0.926) half the vote.
+
+| LB | reading |
+|---|---|
+| **0.937 or below** | the blend does not beat P: our stack costs more than it adds at 0.5. Next probe is a 0.25 weight, not a retreat to P alone without one more look |
+| 0.938 - 0.940 | the stacks are largely redundant; ours adds at most +0.002 |
+| **0.941 - 0.945** | **expected**: two decorrelated stacks, rank mean, one of them 0.012 weaker, typically +0.003 to +0.007 over the better one |
+| 0.946 - 0.949 | better than the full public stack (0.943-0.946); check the blend is not leaking public-LB structure |
+| 0.950 or above | implausible from one equal-weight blend; check the file before believing it |
