@@ -3971,3 +3971,24 @@ three-source blend), but equal weight gives the weaker stack (0.926) half the vo
 | **0.941 - 0.945** | **expected**: two decorrelated stacks, rank mean, one of them 0.012 weaker, typically +0.003 to +0.007 over the better one |
 | 0.946 - 0.949 | better than the full public stack (0.943-0.946); check the blend is not leaking public-LB structure |
 | 0.950 or above | implausible from one equal-weight blend; check the file before believing it |
+
+### Pre-registered rules for Screen E (our own CoAtNet), written before it is pushed (2026-10-01)
+
+**Why this screen.** The compliant public stack scores 0.938 on CoAtNet (384px, public labels) and our own
+seven-member ensemble 0.926-0.927. Capacity and resolution screens closed for our other families, but
+CoAtNet was never tried here, and it is the family the public stack's lead rests on. `knee-phase9-screen-coatnet`:
+fold 0 of `primary_v3`, gold held out, prep9 artifacts, five of nine windows at random, read at five and
+nine, target the three-source blend, scored against the fixed truth steven_v4 binarised. Backbone
+`coatnet_rmlp_1_rw2_224.sw_in12k_ft_in1k` (timm, Apache-2.0; 41.0 M parameters; forward and backward
+checked locally under `group_attention`), batch 4 x 2 accumulated (the memory-safe choice; it is a
+confound the readout states). Arms: **e1** Adam 1e-4 / OneCycle 3e-4 (c2's recipe), **e2** AdamW
+differential 5e-5 backbone / 1e-3 head.
+
+- **Member rule (as in every earlier screen):** an arm added as an eighth member to the seven confirmed
+  ones (c2, c3, f1, s2, t2, a2, d3 fold-0 predictions) clears **+0.0015 with the paired CI above zero**
+  on the fixed truth. Passing buys a five-fold confirm, not a place in a submission.
+- **Replacement read:** each arm minus d3's own confirm fold-0 predictions, paired val CI.
+- **Read of the result:** CoAtNet-1 at 224 is smaller than the public stack's CoAtNet-2 at 384, so a null
+  here does not say CoAtNet cannot help; it says this size at this resolution on this label target does
+  not. A null closes only this arm; the next step then is the larger variant, not abandoning the family.
+- Time budget 9 h; peak memory and minutes per epoch printed per arm.
