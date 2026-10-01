@@ -3849,3 +3849,35 @@ from two kernels that have both run on Kaggle -- the a2 confirm (same gate, fold
 dual read, array naming) and the t2 confirm (same blend-target training frame) -- and it cannot be
 pushed before the quota reset anyway, so the dry run is deferred rather than skipped. **It runs before
 the push.**
+
+### Phase 9 opens: route changed to "everything public that is licence-compliant" (2026-10-01)
+
+**LB pulled 2026-10-01, 4,736 teams.** Submission C 0.925 is rank ~2,360 (median 0.924). 1st 0.961, 2nd
+0.960, six at 0.958, eleven at 0.957. **717 teams sit at exactly 0.943** (the fork stack), 300 at 0.941,
+277 at 0.936. Our clean ensemble extrapolates to ~0.935-0.940, so it cannot reach the 0.943 spike alone.
+
+**Decision (user, 2026-10-01):** use public weights, filtered for licence compliance, and blend our
+ensemble into them. This supersedes the "none of it is usable" line of 2026-09-13, which was written
+under a top-10/Efficiency mandate. Plan: `ai/plans/2026-10-01-phase9-plan.md`; queue state:
+`ai/plans/phase9-queue.md`.
+
+**Licence audit of the 0.943 public pipeline** (`jiweiliu/rsna-knee-fast-2xt4-inference`, same code as
+`yamadan96/rsna-knee-d4-public0946`; dataset licences from `kaggle datasets metadata`):
+
+| component | dataset licence | upstream | verdict |
+|---|---|---|---|
+| Raptor CoAtNet x4 views (`dreaddevelopment/raptor-knee-*`) | CC0 | timm `coatnet_rmlp_2_rw_384.sw_in12k_ft_in1k`, Apache-2.0 (model card) | **in** |
+| CoAt readers: resgated, D4, global96 (`mattiaangeli/rsna-knee-coat*`) | CC0 | same timm CoAtNet family | **in** (confirm repair-v1 source) |
+| DINOv2-small x20 (`pilkwang/rsna-knee-weights`) | CC0 | Meta DINOv2, Apache-2.0 | **in** |
+| A5 "DINOv3 member" (`mattiaangeli/knee-mri-fold-weights`) | CC0 label, **DINOv3 upstream** | Meta DINOv3 licence (derivatives must carry it) | **out** |
+| RadImageNet heads (`antoinegg1/*`, `marwanmath/resnet-50-radimagenet-marwan`) | CC-BY-NC-SA-4.0 | RadImageNet CC-BY-NC-SA | **out** |
+| `prvsiyan/rsna-knee-v52-radimagenet-heads-*` | "other" | RadImageNet | **out** |
+
+A dataset's own CC0 label does not clear a derivative of a restrictively licensed backbone, which is why
+A5 is excluded despite its label (identified from the notebook author's own text: "the public DINOv3
+member from `knee-mri-fold-weights`"). The checkpoint was not downloaded or unpickled: it is
+third-party pickled data, and nothing in the audit needs it opened.
+
+**Blending rule:** equal weight between the public compliant stack and our ensemble, per-label rank
+mean. Other teams' weights saw our validation studies, so no OOF exists for them on our folds; any
+fitted weight would be tuned on 390 public studies (+/-0.003 noise).
