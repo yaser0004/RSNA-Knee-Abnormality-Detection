@@ -1,0 +1,23 @@
+{
+ "id": "mohammadyaserhussain/knee-phase9-submit-g",
+ "title": "knee-phase9-submit-g",
+ "code_file": "knee-phase9-submit-g.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "true",
+ "enable_tpu": "false",
+ "enable_internet": "false",
+ "machine_shape": "NvidiaTeslaT4",
+ "dataset_sources": [
+  "mohammadyaserhussain/rsna-knee-src"
+ ],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [
+  "mohammadyaserhussain/knee-phase8-confirm-d3",
+  "mohammadyaserhussain/knee-phase9-confirm-d3-336"
+ ],
+ "model_sources": []
+}
