@@ -4023,3 +4023,29 @@ The best single model on both tiers (d3 at 224: 0.8781 / 0.9106; a2 0.8704 / 0.9
 - Cost: 90 min per fold against 51 at 224. Eight members is ~40 models; inference ~13 s/study.
 
 Six rows appended to `results/experiments.csv`.
+
+### Screen E: our own CoAtNet-1 clears the member bar by a hair, and costs 2.7x an EfficientNet epoch (2026-10-02)
+
+`knee-phase9-screen-coatnet` (v3, 6.1 h, fold 0, batch 1 x 8; peak GPU memory 5.5 GB; 138.5 min per arm
+against ~47 for d3). Backbone `coatnet_rmlp_1_rw2_224.sw_in12k_ft_in1k` on d3's recipe.
+
+| arm | recipe | val (5 / 9 groups) | gold (5 / 9) | loss |
+|---|---|---|---|---|
+| e1 | Adam 1e-4 / OneCycle 3e-4 | 0.8730 / 0.8752 | 0.8941 / 0.9002 | 0.3701 |
+| e2 | AdamW 5e-5 backbone / 1e-3 head | 0.8710 / 0.8751 | 0.8901 / 0.8996 | 0.3619 |
+
+Read by the rules registered before it ran:
+
+- **Replacement: no.** e1 minus d3's own fold-0 confirm: -0.0080 [-0.0140, -0.0016]; e2: -0.0100
+  [-0.0166, -0.0038]. A 41 M-parameter CoAtNet at 224 is a weaker model than a 5 M EfficientNet-B0 at 224 on
+  this data and target, with both recipes.
+- **Eighth member (five groups, the pre-registered read): e1 +0.0016 [+0.0010, +0.0024], e2 +0.0018
+  [+0.0010, +0.0025]** -- over the +0.0015 bar with the CI above zero, by 0.0001 and 0.0003. At nine groups
+  +0.0014 and +0.0018. Gold spans zero for both.
+- **Not confirmed (a judgement, stated so it is not mistaken for the rule):** the rule permits a five-fold
+  confirm and these arms qualify, but the bar is passed by less than the +0.0036 two runs of one config
+  differed by in Screen A, the confirm would cost ~11.5 h of GPU, and Submission D just showed what
+  +0.0045 of pooled OOF is worth on the LB (+0.001). The public stack's CoAtNet-2 at 384 is a different
+  object. The recipe sensitivity is small (e1 and e2 within 0.002), so the backbone, not the optimizer, is
+  the limit.
+- Two rows appended to `results/experiments.csv`.
