@@ -4115,3 +4115,28 @@ with ~1.3 h of slack; the failure mode is the same timeout again.
 | 0.938 - 0.940 | at most +0.002 from ours |
 | **0.941 - 0.945** | **expected**: two decorrelated stacks, +0.003 to +0.007 over the better |
 | 0.946 or above | better than the full public stack; check the blend for leakage of public-LB structure |
+
+### Submission G scored 0.928: +0.002 for +0.0075 of pooled OOF, the "saturated" row (2026-10-02)
+
+**0.928** (submission 56771279; d3 + d3@336, ten models, 4.36 s/study visible, 0 fallbacks). Band: 0.926-0.928
+"flat against D; our own ensemble is saturated on the public LB whatever its OOF"; the expected row was
+0.929-0.933.
+
+| submission | members | pooled OOF (9 groups) | LB |
+|---|---|---|---|
+| B | 3 | 0.8713 | 0.921 |
+| C | 4 | 0.8754 | 0.925 |
+| D | 6 | 0.8799 | 0.926 |
+| **G** | **2** | **0.8874** | **0.928** |
+
+- **The transfer rate from pooled OOF to the LB is falling steadily**: +0.004 for +0.0041 (C over B), +0.001
+  for +0.0045 (D over C), +0.002 for +0.0075 (G over D) -- about 100%, 20%, 27%. The dilution result was
+  real on OOF and gave the LB a little (the ten-model set beats the thirty-model one), but the order of
+  magnitude says: **the public LB no longer separates our own variants by more than +/-0.002**, which is
+  also the noise from the ~390-study public subset.
+- **Gold -> LB offset +0.017** (0.9134 -> 0.928), inside the 0.015-0.020 range of the last five pairs.
+- **Consequence:** no further own-model work is likely to move the LB by more than a few thousandths on
+  its own. What can move it is the blend with a different kind of model: P at 0.938 is 0.010 above our best,
+  and blend-g (P + G) is the test of whether our half adds anything to it. If blend-g reads at or below
+  0.938, ours adds nothing on the hidden set at equal weight and the remaining effort goes to the public
+  side (more compliant members, weights probed on at most two further reads), not to our own members.
