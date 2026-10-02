@@ -4000,3 +4000,26 @@ Version 3 trains at **batch 1 x 8 accumulated** (the optimizer still steps on 8 
 conv stages sees the ~30 images of one study per call, as it does at batch 4. Gradient checkpointing was
 not used because the conv stages carry BatchNorm and a recomputed forward updates its running statistics
 twice. Rules unchanged.
+
+### d3 at 336px confirmed: the best model yet, and an eighth member above the bar (2026-10-02)
+
+`knee-phase9-confirm-d3-336` (7.9 h, five folds of `primary_v3`, d3's config at 336px, batch 4 x 2
+accumulated as s2 was; target the three-source blend, scored against steven_v4 binarised, gold excluded).
+
+| | pooled OOF (n=4,349) | gold (n=58) |
+|---|---|---|
+| d3@336, 5 groups | 0.8755 | 0.9074 |
+| **d3@336, 9 groups** | **0.8823** | **0.9120** |
+
+The best single model on both tiers (d3 at 224: 0.8781 / 0.9106; a2 0.8704 / 0.9067). Scored offline
+(`ai/scratch/phase9-offline/score8.py`, all nine-group arrays, rows verified identical):
+
+- **d3@336 added to the seven: +0.0022 [+0.0020, +0.0025]** pooled OOF (0.8820 -> 0.8842), CI excluding
+  zero, over the +0.0015 bar; gold +0.0022 [-0.0012, +0.0060], spanning zero. **Promoted as the eighth
+  member.**
+- d3@336 *replacing* d3: +0.0008 [+0.0004, +0.0011], so both stay.
+- 336px on the blend recipe: d3@336 minus d3 is about +0.004 at nine groups on pooled OOF, against
+  +0.0053 for 336 on c2's recipe (s2): the resolution gain survives the better target and recipe, smaller.
+- Cost: 90 min per fold against 51 at 224. Eight members is ~40 models; inference ~13 s/study.
+
+Six rows appended to `results/experiments.csv`.
