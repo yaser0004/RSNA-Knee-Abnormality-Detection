@@ -4140,3 +4140,23 @@ with ~1.3 h of slack; the failure mode is the same timeout again.
   and blend-g (P + G) is the test of whether our half adds anything to it. If blend-g reads at or below
   0.938, ours adds nothing on the hidden set at equal weight and the remaining effort goes to the public
   side (more compliant members, weights probed on at most two further reads), not to our own members.
+
+### blend-g timed out too: P's hidden-set runtime is the unknown, so the blend now carries a deadline (2026-10-02)
+
+Submission 56771289 (P + G, ten of our models) also failed with "Notebook Timeout", where my estimate said
+~7.5-8 h of 9. **My runtime model was wrong, and the error is in P's term.** The visible run (3 studies)
+takes the public pipeline's small-cohort path (readers overlapped in parallel pairs below 48 studies) and
+says nothing about the hidden cohort, which "runs the readers one at a time"; "pending" time from
+submission to score also includes the rerun queue, so it was never a measure of P's runtime. P alone
+fits in 9 h (it scored 0.938) and P + ten models of ours does not.
+
+**Change:** the blend kernel (`build_blend.py`, now with a deadline argument, default 7.9 h) records
+`BLEND_T0` in its first cell and, after the public stack finishes, gives our ensemble only the time left
+before the deadline; `subprocess.run(timeout=...)` kills it at the deadline and the blend cell then
+submits the public stack's own `submission.csv` unchanged. So a slow hidden run now costs the blend, not
+the submission: the worst case is P alone (0.938), not a timeout. The outcome of the next blend submission
+therefore reads as: **0.938 = our half did not fit** (P's hidden run is over ~6-6.5 h); **above 0.938 =
+it fit and the blend is worth the reading**. Kill path tested locally with a sleeping child.
+
+Banded as before, plus that first row: blend-g v2: 0.938 means the deadline fired (no information about
+our half, one information about P's runtime); 0.941-0.945 expected if it fit.
