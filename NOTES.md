@@ -4070,3 +4070,48 @@ Submission F (40 models, two of them 336px) would time out the same way; **blend
 may cost at most ~2 h, which is roughly 15 models at 224px (a visible-run forward of ~0.14 s/model/study
 plus ~1.5 s/study of shared prep, scaled to ~1,300 studies). Ours is therefore chosen by pooled OOF at a
 fixed model budget, not by membership of the full ensemble.
+
+### Fewer members is better: d3 + d3@336 beats all eight; G and blend-g, with bands registered before they are submitted (2026-10-02)
+
+Pooled OOF at nine groups (`ai/scratch/phase9-offline/subsets.py`, exhaustive over subsets of the eight
+confirmed members, rows verified identical):
+
+| set | models | pooled OOF | gold |
+|---|---|---|---|
+| all eight (equal mean) | 40 | 0.8842 | 0.9114 |
+| **d3 + d3@336** | **10** | **0.8874** | **0.9134** |
+| t2 + d3 + d3@336 | 15 | 0.8874 | 0.9106 |
+| t2 + a2 + d3 + d3@336 | 20 | 0.8867 | 0.9118 |
+| Submission D's six | 30 | 0.8799 | 0.9078 |
+
+**The two blend-target group-attention models alone are better than the full equal-weight mean**: the older
+members (c2, c3, f1, s2, which trained on one label source and a fixed or mean-pooled head) dilute them.
+The selection is among 247 subsets, so its optimism is small at n=4,349 but not zero; the two-member set
+is also the one both members' own confirms point to (+0.0077 and +0.0119 over a2 on the blend target). It
+fits the runtime budget set by blend-e's timeout: ~13 model-units against ~46.
+
+**Submission G = d3 + d3@336, 10 models** (`phase9-submit-g`), and **blend-g = P + G**, equal weight
+(`phase9-submit-blend-g`). Visible runs pushed 2026-10-02 08:49 UTC.
+
+**Band for G alone.** D (six members, pooled OOF 0.8799) scored 0.926 and moved the LB a fifth of its OOF
+delta. G is +0.0075 over D on pooled OOF and +0.0056 on gold, with a different composition (two models, one
+label source family), so the transfer rate is not the last one's by assumption.
+
+| LB | reading |
+|---|---|
+| 0.925 or below | the dilution result does not transfer: the older members were helping on the hidden set |
+| 0.926 - 0.928 | flat against D; our own ensemble is saturated on the public LB whatever its OOF |
+| **0.929 - 0.933** | **expected**: a fifth to a half of +0.0075, on top of D's 0.926 |
+| 0.934 - 0.937 | better than any plausible transfer; check the file |
+| 0.938 or above | implausible for ten EfficientNet-B0 models; check for a leak |
+
+**Band for blend-g (P 0.938 + G, equal weight).** Expected runtime: P ~5.5-6.2 h + G ~1.3-1.5 h, inside 9 h
+with ~1.3 h of slack; the failure mode is the same timeout again.
+
+| LB | reading |
+|---|---|
+| timeout / no score | P is slower than its 6 h estimate or ours more than 2 h; cut ours to d3@336 alone or drop a P reader |
+| 0.937 or below | the blend does not beat P: the two stacks are not decorrelated enough on the hidden set |
+| 0.938 - 0.940 | at most +0.002 from ours |
+| **0.941 - 0.945** | **expected**: two decorrelated stacks, +0.003 to +0.007 over the better |
+| 0.946 or above | better than the full public stack; check the blend for leakage of public-LB structure |
