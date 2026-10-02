@@ -4049,3 +4049,24 @@ Read by the rules registered before it ran:
   object. The recipe sensitivity is small (e1 and e2 within 0.002), so the backbone, not the optimizer, is
   the limit.
 - Two rows appended to `results/experiments.csv`.
+
+### blend-e failed on the hidden set: "Notebook Timeout"; the runtime budget is now a design constraint (2026-10-02)
+
+Submission 56759988 (P + seven-member ensemble, 35 models, equal-weight rank mean) came back with no
+score. The submission's `error_description`, readable through the Python API (`competition_submissions`)
+and on the My Submissions page, says "Your submission notebook exceeded the allowed runtime ... the hidden
+dataset can be larger/smaller/different than the public". The CLI table shows only an empty score next to
+`COMPLETE`, which is why it looked like a stuck scoring job for hours; the Python record is the way to read
+a failed submission. It costs a Kaggle submission slot, not a quota.
+
+**What the timings say.** The visible run was clean (35 models, 6.31 s/study, 0 fallbacks) and said nothing
+about the hidden run. Wall times from submission to score on the hidden set: **D (30 models) ~2.6-3.3 h;
+P alone ~5.5-6.2 h** (pending at 21:49 UTC, scored by 22:29 UTC after a 16:18 submission, with no other
+hidden run in the queue ahead of it). P is therefore the expensive half -- its "under 30 minutes" is a
+claim for a different test size -- and P plus ours at 35 models is ~9 h or more, over the 9 h limit.
+Submission F (40 models, two of them 336px) would time out the same way; **blend-f is withheld.**
+
+**Rule from here:** a blend's budget is P's ~6 h plus ours, with at least 1 h of slack under 9 h, so ours
+may cost at most ~2 h, which is roughly 15 models at 224px (a visible-run forward of ~0.14 s/model/study
+plus ~1.5 s/study of shared prep, scaled to ~1,300 studies). Ours is therefore chosen by pooled OOF at a
+fixed model budget, not by membership of the full ensemble.
