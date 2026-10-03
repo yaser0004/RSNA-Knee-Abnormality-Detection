@@ -4230,3 +4230,23 @@ Read by the rules registered before it ran:
 - **The label lever is closed for Phase 9.** The survey found no set above steven_v4 on gold (five were
   contaminated), the one different reading (dreaddevelopment's) adds nothing as a fourth source, and the
   three-source blend stays the target. Two rows appended to `results/experiments.csv`.
+
+### blend-g v2 scored 0.938: the deadline fired, P's hidden run leaves our half less than ~1.6 h (2026-10-03)
+
+**0.938** (submission 56785577; P + G with the 7.9 h deadline watchdog), identical to P alone (0.938). Registered
+reading: "0.938 = the deadline fired". A real blend of two stacks 0.010 apart would not land on P's score to
+three decimals, and the submission completed, so the watchdog worked: it killed (or skipped) our half and
+shipped P's own file. This is also the first observation of a failure mode turning into a result instead of a
+timeout, which is what it was built for.
+
+**What it says about P.** Our ten-model G needs ~1.6 h on the hidden set (4.4 s/study visible; D's thirty models
+scored from a 2.6-3.3 h wall time). It did not fit in the time P left, so **P's hidden run is over ~6.3 h
+(7.9 h less G's 1.6 h) and at most ~8.1 h** (it finished, with its own start-up, inside the 9 h limit). P is
+the expensive half by a wide margin and P alone has little slack against the limit.
+
+**Next probe.** Our half shrunk to d3 alone (five models at 224px, best single model by pooled OOF
+0.8781 at nine groups; ~0.7 h on the hidden set: ~0.5 h of shared prep, ~0.2 h of forwards), with the
+deadline moved to 8.0 h. If P finishes by ~7.3 h the blend runs. Reading, registered now:
+**0.938 again = P needs more than ~7.3 h, the blend is out of reach, and P itself is the final candidate with
+a note that its margin under 9 h is thin.** A score above 0.938 = the blend fit; expected 0.940-0.944 (one
+EfficientNet member, the best, at half weight next to a 0.938 stack).
