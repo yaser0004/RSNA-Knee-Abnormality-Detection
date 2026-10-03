@@ -4185,3 +4185,24 @@ both cover). Reference: steven_v4 gold 0.8927, ours 0.8616, lixin73 0.8488, the 
   swapping it in would not change the target. Nothing here justifies a retrain. The only different
   reading is dreaddevelopment's, which cannot be validated on gold; it is the one remaining label
   experiment with a plausible edge (a fourth source in the blend), and it is a screen, not an assumption.
+
+### Pre-registered rules for Screen F (a fourth label source), written before it is pushed (2026-10-03)
+
+`knee-phase9-screen-labels`: fold 0 of `primary_v3`, gold held out, prep9 artifacts, d3's config (group
+attention, five of nine random windows, EfficientNet-B0, Adam 1e-4 / OneCycle 3e-4, batch 8), read at five
+and nine groups, scored against the fixed truth steven_v4 binarised. **f1** trains on the probability mean of
+steven_v4, ours, lixin73 and `dreaddevelopment/rsna-knee-labels` (CC0, soft labels, 4,349 studies); **f2**
+on `dreaddevelopment` alone. The control is d3's own fold-0 confirm predictions (Screen D licensed pairing
+against a confirm: the same config on the same artifacts reproduces its fold 0).
+
+- **The target question is read as Screen D read it: f1 minus d3's fold-0 val delta with a CI above zero
+  promotes the four-source blend as the target for later confirms**, measured on steven_v4's own
+  binarised labels (the control's home turf, as every earlier target comparison was). Gold (n=58) cannot
+  resolve it and is reported only.
+- **If the delta's CI spans zero:** the arm is judged as a member only: added as a ninth member to the eight
+  confirmed (c2, c3, f1, s2, t2, a2, d3, d3@336), **+0.0015 with the paired CI above zero** -> a five-fold
+  confirm as a member config, not a target change.
+- **f2 is information, not a candidate:** if f2 is far below d3 the source is weak alone and its value in
+  f1 is a blend effect; if it matches d3 the public Raptor labels are as good as ours.
+- A null closes the label lever for Phase 9: three independent source sets (and now a fourth) have been
+  tried, and the survey found no set that beats steven_v4 on gold.
