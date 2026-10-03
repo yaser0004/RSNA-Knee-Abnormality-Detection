@@ -4160,3 +4160,28 @@ it fit and the blend is worth the reading**. Kill path tested locally with a sle
 
 Banded as before, plus that first row: blend-g v2: 0.938 means the deadline fired (no information about
 our half, one information about P's runtime); 0.941-0.945 expected if it fit.
+
+### Survey of 15 newer public label sets: five are contaminated, none beats the target we have (2026-10-03)
+
+Scored on the 58 gold studies with a contamination check (`ai/scratch/phase9-labels/score_gold.py`: macro AUC,
+exact agreement of binarised labels with gold, and AUC against the current three-source blend on the studies
+both cover). Reference: steven_v4 gold 0.8927, ours 0.8616, lixin73 0.8488, the old five-way rank blend 0.8976.
+
+- **Contaminated (gold macro 1.0000, agreement 1.0000 on the 58): `rayanbabur/...calibrated-soft-targets`
+  (hard and soft), `tasmeemreza/...refined-llm-labels`, `yehezkielhaganta/psuedo-labeling-knee` (data, train).**
+  Their gold rows are copied from `train.csv`, as `yunusgmsoy/...4-source-merged` was. Rejected: a score of
+  1.0000 on gold says nothing about the other 4,349 rows.
+- **Clean and scored:** `riadmohamed42/jev-knee-labels` HYBRID_scores **0.9025** (agreement 0.81, like
+  steven's 0.82, so not copied; AUC against our target 0.997, i.e. it is largely made of the sources we
+  already blend); `ctogaurav/...v4-blend` 0.8927 (the same file as steven_v4, AUC against the target 0.9996);
+  JEV FINAL2 scores 0.8745; `laymond` Qwen weak labels 0.8295 (the `_v2` files 0.42: unusable).
+- **Not scoreable on gold (the file omits the 58 gold rows):** `dreaddevelopment/rsna-knee-labels` (the labels the
+  public Raptor CoAtNets train on; AUC against our target 0.93, so it is a genuinely different reading),
+  `nartaa` v0/v1 (0.9996 / 0.997 against our target, i.e. the same sources), `gperdrizet` (CC-BY-NC-SA,
+  excluded by licence), `vmohitrao` (CC BY-NC, excluded).
+- **Licences of the clean candidates:** HYBRID, dreaddevelopment, ctogaurav, nartaa CC0; saisahanas Apache-2.0.
+- **Reading:** the one clean set above steven_v4 on gold, HYBRID (+0.0098, n=58, a CI of about +/-0.04), is
+  indistinguishable from it at this n and is 0.997 correlated with the target we already train on, so
+  swapping it in would not change the target. Nothing here justifies a retrain. The only different
+  reading is dreaddevelopment's, which cannot be validated on gold; it is the one remaining label
+  experiment with a plausible edge (a fourth source in the blend), and it is a screen, not an assumption.
