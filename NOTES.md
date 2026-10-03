@@ -4206,3 +4206,27 @@ against a confirm: the same config on the same artifacts reproduces its fold 0).
   f1 is a blend effect; if it matches d3 the public Raptor labels are as good as ours.
 - A null closes the label lever for Phase 9: three independent source sets (and now a fourth) have been
   tried, and the survey found no set that beats steven_v4 on gold.
+
+### Screen F: a fourth label source changes nothing; the label lever is closed (2026-10-03)
+
+`knee-phase9-screen-labels` (3.7 h wall, fold 0, d3's config, prep9 artifacts, gold held out; 53 and 50 min of
+training per arm; the rest was session start-up and the data mount).
+
+| arm | target | val (5 / 9 groups) | gold (5 / 9) | loss |
+|---|---|---|---|---|
+| f1 | mean of steven_v4, ours, lixin73 and dreaddevelopment | 0.8794 / 0.8854 | 0.9045 / 0.9169 | 0.3790 |
+| f2 | dreaddevelopment alone | 0.8590 / 0.8657 | 0.8996 / 0.9074 | 0.4137 |
+
+(d3's own fold-0 confirm: 0.8810 / 0.8852 val, 0.9008 / 0.9105 gold.)
+
+Read by the rules registered before it ran:
+
+- **Target: not promoted.** f1 minus d3 on val: **-0.0015 [-0.0064, +0.0032]**, CI spanning zero (gold +0.0037
+  [-0.0119, +0.0205], also zero). Adding the fourth source neither helps nor hurts.
+- **Member: not confirmed.** f1 as a ninth member +0.0009 [+0.0004, +0.0014], under the +0.0015 bar; f2 +0.0006
+  [+0.0001, +0.0011] on val (gold +0.0064 [+0.0023, +0.0115], which at n=58 is not a basis for a ~5 h confirm).
+- **f2: the source is weak alone**: -0.0220 [-0.0297, -0.0153] against d3 on val, so the public Raptor labels are
+  worth less as a sole target than the three-source blend, and add nothing to it.
+- **The label lever is closed for Phase 9.** The survey found no set above steven_v4 on gold (five were
+  contaminated), the one different reading (dreaddevelopment's) adds nothing as a fourth source, and the
+  three-source blend stays the target. Two rows appended to `results/experiments.csv`.
