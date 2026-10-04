@@ -4250,3 +4250,20 @@ deadline moved to 8.0 h. If P finishes by ~7.3 h the blend runs. Reading, regist
 **0.938 again = P needs more than ~7.3 h, the blend is out of reach, and P itself is the final candidate with
 a note that its margin under 9 h is thin.** A score above 0.938 = the blend fit; expected 0.940-0.944 (one
 EfficientNet member, the best, at half weight next to a 0.938 stack).
+
+### blend-h scored 0.936, below P: the blend ran, and our half at equal weight costs 0.002 (2026-10-04)
+
+**0.936** (submission 56809803; P + d3 alone, five models, equal-weight per-label rank mean, 8.0 h deadline).
+It is not P alone (0.938), so this time the blend ran: **P's hidden run finished with at least the ~0.7 h
+that d3 needs left before the 8.0 h deadline, i.e. P takes under ~7.3 h**, and the earlier 0.938 for P + G
+was the deadline firing on G's 1.6 h. P's hidden-set runtime is therefore between ~6.3 h and ~7.3 h.
+
+Band row hit: "0.937 or below = the blend does not beat P". **A rank mean at half weight of a 0.938 stack and
+a ~0.926-0.928 stack scores below the better one**, by 0.002: our models are not a decorrelated strengthener
+here, they are a weaker voice. That matches the arithmetic of the last week (own variants move the LB by
++/-0.002; P is 0.010 ahead of the best of them), and it means the blend as designed cannot be the way up.
+
+**What remains of the blend idea** is the weight: at 0.2 or less the weaker stack's votes mostly break ties,
+which is the only regime in which two stacks 0.010 apart can both help. One probe at 0.2 (submission
+blend-i) is worth its slot; nothing is expected beyond +0.001-0.002. If it reads at or below 0.938, P is the
+final candidate and the blend is closed.
