@@ -35,8 +35,16 @@ them and scored **0.921** (rank 1,789 of 3,959 on 2026-09-18), at the floor of i
 c2's config read at 336px is confirmed as a fourth member (pooled OOF +0.0042 [+0.0033, +0.0051])
 and read at nine groups joined the others in Submission C, which scored **0.925** (rank 1,712 of
 3,994 on 2026-09-19), the top of its pre-registered expected row;
-**Phase 8** now targets the 0.95 cluster — plan in `ai/plans/2026-09-19-phase8-win-plan.md`, findings
-in `NOTES.md` from 2026-09-19.**
+**Phase 8** (random training windows, a three-source blend target, group-token attention) took our own
+ensemble from 0.925 to **0.928** (two models, d3 and d3@336, pooled OOF 0.8874) while pooled OOF rose
+from 0.8754 to 0.8874: the public leaderboard stopped rewarding our own variants beyond +/-0.002.
+**Phase 9** (2026-10-01 on) added the licence-compliant part of the public stack — DINOv2 x20, Raptor
+CoAtNet x4 views and four CoAtNet readers; RadImageNet heads and the DINOv3-derived members are excluded
+because their licences conflict with the CC-BY-NC 4.0 winner release, audit in `NOTES.md` — which scores
+**0.938 alone** (`notebooks/phase9-public-stack/`). Blended with our d3 at 0.2 weight it scored **0.939**
+(`notebooks/phase9-submit-blend-i/`; at 0.5 weight it scored 0.936). The public stack's hidden-set run takes
+6.3-7.3 h of the 9 h limit, so the blend kernel carries a deadline that falls back to the public stack
+alone. Findings and every band read against its score are in `NOTES.md`; plans in `ai/plans/`.**
 
 **Where we actually stand.** On 2026-09-18 the field was 3,959 teams: 1st **0.957**, median **0.913**,
 our 0.921 at rank **1,789**. The spikes grew — 538 teams at exactly 0.941, 321 at 0.936 — so 0.942 ranks

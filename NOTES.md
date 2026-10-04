@@ -4267,3 +4267,24 @@ here, they are a weaker voice. That matches the arithmetic of the last week (own
 which is the only regime in which two stacks 0.010 apart can both help. One probe at 0.2 (submission
 blend-i) is worth its slot; nothing is expected beyond +0.001-0.002. If it reads at or below 0.938, P is the
 final candidate and the blend is closed.
+
+### blend-i scored 0.939: a low-weight blend helps by a thousandth; the blend question is closed (2026-10-04)
+
+**0.939** (submission 56819611; P + d3 at our weight 0.2, deadline 8.0 h). Registered reading: above 0.938 =
+a low-weight blend helps. The three weights now read, on the same public stack and the same d3 member:
+
+| our weight | LB |
+|---|---|
+| 0 (P alone) | 0.938 |
+| 0.2 | **0.939** |
+| 0.5 | 0.936 |
+
+The curve has the shape expected of a weaker, partly decorrelated voice (a tie-breaker at 0.2, a drag at 0.5),
+but the effect is +0.001 on a public subset whose noise is +/-0.002, so this is **not evidence that the blend
+is better than P**, only that it is not worse at 0.2. The blend kernel completed with our half running
+(0.939 is not P's file), so P plus d3's five models fit inside the limit with the 8.0 h watchdog in place.
+
+**Standing of the two candidate final entries** (both complete inside the limit on the hidden set):
+P alone **0.938** (`knee-phase9-public-stack` v1) and P + d3 at 0.2 **0.939** (`knee-phase9-submit-blend-i` v1).
+They share P's 0.938 as their core, so they are one bet, not two; a second final slot is cheaper spent on
+a different risk (see the plan note). Probing weights below 0.2 would be reading noise.
