@@ -4306,3 +4306,18 @@ reproduces the fork spike (rank ~1,000-1,100 behind its 717 ties); a timeout = t
 limit on our runs, which would also say P's 6.3-7.3 h is mostly the shared CoAt stages; 0.938 or lower =
 something in our copy differs.** Our own members join only at a low weight and only if the base finishes with
 enough time left: the watchdog blend (`build_blend.py`) applies.
+
+### The full public stack scored 0.943, as published; rank ~1,100 (2026-10-05)
+
+**0.943** (submission 56829311; `knee-phase9-public-full` v1, the unmodified public notebook after the user reopened
+the licence route). Registered band 0.942-0.944 = "reproduces the fork spike": it did. Against the compliant
+subset P (0.938) the excluded members are worth **+0.005**, which is the whole price of the licence filter.
+The run completed inside the limit on our submission, so the full stack's hidden-set runtime is under ~7 h
+(submitted 16:50 UTC, scored before 23:49 UTC, queue included).
+
+Standing: 717 teams sit at exactly 0.943 and ties go to the earlier submission, so this is rank ~1,100 on the
+2026-10-02 board. Next, one low-weight blend of d3 onto the full stack (`build_blend.py`, now taking the union of
+both kernels' `kernel_sources` because the full notebook mounts two kernel outputs), our weight 0.15, deadline
+8.0 h. Band registered now: **0.944-0.946 = our half adds a little (blend-i added +0.001 to P); 0.943 = no
+change; 0.942 or below = it hurts and the full stack alone is the final candidate.** A miss of the deadline
+returns the full stack's own 0.943.
