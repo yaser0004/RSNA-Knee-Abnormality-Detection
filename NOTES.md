@@ -4288,3 +4288,21 @@ is better than P**, only that it is not worse at 0.2. The blend kernel completed
 P alone **0.938** (`knee-phase9-public-stack` v1) and P + d3 at 0.2 **0.939** (`knee-phase9-submit-blend-i` v1).
 They share P's 0.938 as their core, so they are one bet, not two; a second final slot is cheaper spent on
 a different risk (see the plan note). Probing weights below 0.2 would be reading noise.
+
+### Direction change (user, 2026-10-04): reopen the licence route, starting from the unmodified public stack
+
+Asked how to use the last 18 days, the user chose **"reopen the licence route"**: use the full public 0.943 stack
+including the members the 2026-10-01 audit excluded (RadImageNet heads, CC-BY-NC-SA; the DINOv3-derived A5
+weights). This supersedes the "licence-compliant only" filter of 2026-10-01. Consequences recorded so they are
+not lost: (1) those members cannot appear in a winner deliverable released under CC-BY-NC 4.0, so this route
+forfeits prize eligibility for any entry that includes them, which is irrelevant at the expected rank (~1,100) and
+matters only if the standing changed; (2) the audit table above still says exactly which parts to remove if
+that ever mattered; (3) the pipeline is another author's code, so it lives under `ai/scratch/phase9-full/`
+(attribution header intact in its first cell) and is not added to this repository.
+
+**Step 1: the notebook as published** (`yamadan96/rsna-knee-d4-public0946`, whose own header says it scores 0.943),
+pushed unchanged as `knee-phase9-public-full` with our metadata. Reading, registered now: **0.942-0.944 =
+reproduces the fork spike (rank ~1,000-1,100 behind its 717 ties); a timeout = the full stack does not fit the
+limit on our runs, which would also say P's 6.3-7.3 h is mostly the shared CoAt stages; 0.938 or lower =
+something in our copy differs.** Our own members join only at a low weight and only if the base finishes with
+enough time left: the watchdog blend (`build_blend.py`) applies.
