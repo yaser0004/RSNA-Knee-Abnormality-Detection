@@ -2,7 +2,8 @@ import numpy as np
 import pytest
 import torch
 
-from knee.features import extract_study_features, load_feature_cache, save_feature_cache
+from knee.features import (PooledBackbone, extract_study_features, load_feature_cache,
+                           save_feature_cache)
 
 D, S, G = 8, 6, 9
 
@@ -107,3 +108,51 @@ def test_row_count_must_match_the_uids(tmp_path):
     feats, mask, uids = _cache()
     with pytest.raises(ValueError, match="rows"):
         save_feature_cache(tmp_path / "feat.npz", feats, mask, uids[:-1], backbone="stub")
+
+
+class TokenStub(torch.nn.Module):
+    """Mimics a timm ViT: forward_features returns [B, prefix + patches, D], the first
+    token being CLS, the next `num_prefix_tokens - 1` registers. Records its input."""
+
+    def __init__(self, n_prefix=5, n_patches=7, width=4):
+        super().__init__()
+        self.num_prefix_tokens = n_prefix
+        self.num_features = width
+        self.n_patches = n_patches
+        self.last_input = None
+
+    def forward_features(self, x):
+        self.last_input = x
+        b = x.shape[0]
+        g = torch.Generator().manual_seed(3)
+        return torch.randn(b, self.num_prefix_tokens + self.n_patches, self.num_features, generator=g)
+
+
+def test_pooled_backbone_is_cls_then_mean_of_patch_tokens_only():
+    stub = TokenStub()
+    wrapped = PooledBackbone(stub)
+    x = torch.rand(2, 3, 8, 8)
+
+    out = wrapped(x)
+    tokens = stub.forward_features(x)
+
+    assert out.shape == (2, 2 * stub.num_features) and wrapped.num_features == 2 * stub.num_features
+    assert torch.allclose(out[:, :4], tokens[:, 0])
+    # registers sit between CLS and the patches and must not enter the patch mean
+    assert torch.allclose(out[:, 4:], tokens[:, stub.num_prefix_tokens:].mean(dim=1))
+
+
+def test_pooled_backbone_normalises_its_input_with_the_given_statistics():
+    stub = TokenStub()
+    wrapped = PooledBackbone(stub, mean=(0.5, 0.5, 0.5), std=(0.25, 0.25, 0.25))
+
+    wrapped(torch.full((1, 3, 8, 8), 0.75))
+
+    assert torch.allclose(stub.last_input, torch.ones(1, 3, 8, 8))
+
+
+def test_pooled_backbone_is_frozen_and_in_eval_mode():
+    wrapped = PooledBackbone(TokenStub())
+
+    assert not wrapped.training
+    assert all(not p.requires_grad for p in wrapped.parameters())

@@ -19,6 +19,37 @@ class FeatureCache:
     backbone: str
 
 
+class PooledBackbone(torch.nn.Module):
+    """A timm ViT as a frozen per-image feature extractor: [N, 3, H, W] in [0, 1] ->
+    [N, 2 * D], the CLS token followed by the mean of the patch tokens.
+
+    Registers (DINOv3 has four) sit between CLS and the patches, so the patch mean starts
+    at `num_prefix_tokens`, not at 1. Normalisation is done here because the pipeline's
+    loader hands over raw [0, 1] pixels: the fine-tuned members learned that scale, a frozen
+    backbone expects the statistics it was pretrained with."""
+
+    def __init__(self, model: torch.nn.Module,
+                 mean: tuple[float, ...] = (0.485, 0.456, 0.406),
+                 std: tuple[float, ...] = (0.229, 0.224, 0.225)):
+        super().__init__()
+        self.model = model.eval()
+        for p in self.model.parameters():
+            p.requires_grad_(False)
+        self.num_features = 2 * int(model.num_features)
+        self.register_buffer("mean", torch.tensor(mean).view(1, -1, 1, 1))
+        self.register_buffer("std", torch.tensor(std).view(1, -1, 1, 1))
+        self.eval()
+
+    def train(self, mode: bool = True):
+        return super().train(False)  # a frozen extractor never leaves eval mode
+
+    @torch.no_grad()
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        tokens = self.model.forward_features((x - self.mean) / self.std)
+        prefix = self.model.num_prefix_tokens
+        return torch.cat([tokens[:, 0], tokens[:, prefix:].mean(dim=1)], dim=-1)
+
+
 @torch.no_grad()
 def extract_study_features(backbone: torch.nn.Module, volume: torch.Tensor,
                            present: torch.Tensor) -> torch.Tensor:
