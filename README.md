@@ -430,10 +430,29 @@ notebooks/           thin Kaggle notebooks: import knee, call one function
   phase8-confirm-d3/   5-fold confirm of Phase 8's two findings together: a2's config (group-token
                         attention, random windows) trained on the blend target Screen D promoted,
                         read at five and nine groups, scored as a seventh member
+  phase8-submit-d/     Submission D: six members (c2, c3, f1, s2, t2, a2), thirty models, scored 0.926
+  phase9-confirm-d3-336/  d3's config at 336px (batch 4 x 2 accumulated), the eighth member (pooled OOF
+                        0.8823 at nine groups, the best single model)
+  phase9-screen-coatnet/  Screen E, fold 0: our own CoAtNet-1 on d3's recipe; passed the member bar by
+                        a hair, not confirmed
+  phase9-screen-labels/   Screen F, fold 0: a fourth label source (dreaddevelopment's soft labels); null
+  phase9-submit-e/ -f/ -g/ -h/  Submissions E (seven members), F (eight), G (d3 + d3@336, scored 0.928)
+                        and H (d3 alone, the member of the blends below)
+  phase9-public-stack/ the licence-compliant part of a public notebook (DINOv2 x20, Raptor CoAtNet x4
+                        views, four CoAtNet readers; RadImageNet and DINOv3-derived members removed),
+                        scored 0.938. Third-party code by the authors credited in its first cell; the
+                        edits are asserted text swaps in `ai/scratch/phase9-public/build_p.py`
+  phase9-submit-blend/ -e/ -f/ -g/ -h/ -i/  the public stack plus our members at a stated weight, with a
+                        deadline watchdog from -g's second version on (the public stack's hidden-set run
+                        takes 6.3-7.3 h of the 9 h limit; -e and -g's first version timed out). -h at
+                        weight 0.5 scored 0.936, -i at 0.2 scored 0.939
 tests/               pytest, runs locally on a small sample, no GPU needed
 data/sample/         studies pulled via Kaggle API for local dev (gitignored)
 checkpoints/         trained model weights + OOF arrays (gitignored, large binaries)
-results/             experiment tracking + Phase 2 census outputs, see below
+results/             experiment tracking + Phase 2 census outputs, see below. The report-derived label
+                     files (`pseudo_labels_qwen3_4b.csv`, `label_confidence.csv`) are gitignored: the
+                     competition rules keep report-derived labels private, so they stay on disk and in
+                     private Kaggle datasets only
 ```
 
 ## Experiment tracking

@@ -22,3 +22,7 @@ kaggle.json
 # OS / editor
 .DS_Store
 *.swp
+
+# labels derived from the competition reports: the rules keep them private, never published with the code
+results/pseudo_labels_qwen3_4b.csv
+results/label_confidence.csv
