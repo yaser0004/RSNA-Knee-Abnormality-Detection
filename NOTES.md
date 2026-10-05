@@ -4374,3 +4374,26 @@ cached DINOv3-L features, three-source blend target, gold excluded from every sp
 >= +0.0025 with the paired CI above zero** (d3 at 224 is 0.8781; the eight together 0.8842; a different family may pass on
 gain alone, as c3 did). **Fail:** try a partial unfreeze through cached intermediate tokens; if that also fails, the track
 stops and the 0.943 entries are the final candidates.
+
+### Pilot read: the checkpoint loads, DINOv3-L at 336px is cheap, and one registered check failed on its own design (2026-10-06)
+
+`knee-phase10-features-pilot` (200 studies, DINOv3 ViT-L/16 at 336px, Tesla T4, timm 1.0.29). Against the three conditions
+registered before the push:
+
+1. **Strict load: pass.** `dinov3_vitl16_pretrain_lvd1689m-8aa4cbdd.pth` carries Meta's original key names (`storage_tokens`,
+   `rope_embed.periods`); timm's own `eva.checkpoint_filter_fn` converts them and the load is `strict=True` into
+   `vit_large_patch16_dinov3` (prefix tokens 5 = CLS + 4 registers, 1,024 features). Without the converter it fails
+   with 'missing reg_token, gamma_1...', which is why the notebook tries both. No random layer survives.
+2. **Finite and different across studies: the finiteness assertion held; the between-study check FAILED as written.** Mean cosine
+   of the same slot and window across *different* studies was **0.888**, against **0.825** for one study's window 0 against its
+   window 4. The registered rule wanted between < within. **The check was badly built:** its "within" pair compares two
+   different anatomical depths, while its "between" pair compares the same depth in two knees, so depth, not study identity,
+   sets the order. It says nothing about whether the features carry study-specific information, which only Gate G1 can show.
+   Recorded as a failed check with that diagnosis, not as a pass; extraction costs ~1.5 GPU-h, so it proceeds.
+3. **Throughput: pass.** Decoding 0.092 s/study; the model 47.0 images/s at 336px (peak 1.9 GB), 44.2 present images/study, so
+   **1.192 s/study end to end: 1.46 h for the 4,407-study corpus and 25.8 min for ~1,300 test studies**, against limits of
+   2.5 h and 36 min. The GPU is the bottleneck, not the JPEG decode. The cache is 2,048 features per window (CLS + mean
+   patch), ~0.91 GB for the corpus.
+
+**Next:** the corpus extraction kernel (all 4,407 studies, in parts of ~1,100 so a late failure loses at most one part), then
+Gate G1 exactly as registered on 2026-10-06.
