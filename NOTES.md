@@ -4321,3 +4321,23 @@ both kernels' `kernel_sources` because the full notebook mounts two kernel outpu
 8.0 h. Band registered now: **0.944-0.946 = our half adds a little (blend-i added +0.001 to P); 0.943 = no
 change; 0.942 or below = it hurts and the full stack alone is the final candidate.** A miss of the deadline
 returns the full stack's own 0.943.
+
+### The full stack plus d3 scored 0.943, the same as the full stack alone: our half adds nothing measurable (2026-10-05)
+
+**0.943** (submission 56838003; `knee-phase9-blend-full` v1: the full public stack + d3's five models at weight 0.15,
+8.0 h watchdog). Registered band: "0.943 = no change (or the watchdog fired)". Public LB cannot separate the two
+readings, and it does not need to: either our half ran and moved nothing at three decimals, or the full stack left
+it no time. Against P the same d3 at weight 0.2 added +0.001 (0.938 -> 0.939); on a stack 0.005 stronger it adds
+less than the 0.001 the board can show.
+
+**Final state of the scores (public LB, 2026-10-05):** full public stack **0.943**; full stack + d3 (0.15) **0.943**;
+compliant stack P + d3 (0.2) **0.939**; P alone 0.938; our own best ensemble G 0.928. Rank for 0.943 is ~1,100
+behind its 717 ties. Everything that could be measured with the time and the licence route available has been:
+own members, label sources, the fourth source, resolution, CoAtNet at our scale, the blend weight at 0.15, 0.2, 0.5.
+The remaining distance to the 0.95+ teams (0.007 or more) is not a gap that any of those levers closed.
+
+**The two candidates for the final selection**, both completing inside the 9 h limit on the hidden set:
+(1) `knee-phase9-public-full` v1, 0.943, the published code unmodified (runtime known to fit); (2)
+`knee-phase9-blend-full` v1, 0.943, adds our independent models at 0.15 behind a watchdog that falls back to (1).
+The licence-clean pair (P 0.938, blend-i 0.939) is the hedge only if prize eligibility ever matters; it does
+not at this rank. The selection itself is the user's, on the My Submissions page, by 2026-10-22.

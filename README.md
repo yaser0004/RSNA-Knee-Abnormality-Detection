@@ -44,7 +44,10 @@ because their licences conflict with the CC-BY-NC 4.0 winner release, audit in `
 **0.938 alone** (`notebooks/phase9-public-stack/`). Blended with our d3 at 0.2 weight it scored **0.939**
 (`notebooks/phase9-submit-blend-i/`; at 0.5 weight it scored 0.936). The public stack's hidden-set run takes
 6.3-7.3 h of the 9 h limit, so the blend kernel carries a deadline that falls back to the public stack
-alone. Findings and every band read against its score are in `NOTES.md`; plans in `ai/plans/`.**
+alone. On 2026-10-04 the licence route was reopened by decision: the full public stack, unmodified
+(the excluded members included, so it cannot ship in a CC-BY-NC 4.0 winner release), scored **0.943** (rank
+about 1,100 behind its 717 ties), and the same stack with our d3 at 0.15 weight also scored **0.943**.
+Findings and every band read against its score are in `NOTES.md`; plans in `ai/plans/`.**
 
 **Where we actually stand.** On 2026-09-18 the field was 3,959 teams: 1st **0.957**, median **0.913**,
 our 0.921 at rank **1,789**. The spikes grew — 538 teams at exactly 0.941, 321 at 0.936 — so 0.942 ranks
