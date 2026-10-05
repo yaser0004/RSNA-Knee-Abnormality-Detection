@@ -4341,3 +4341,36 @@ The remaining distance to the 0.95+ teams (0.007 or more) is not a gap that any 
 `knee-phase9-blend-full` v1, 0.943, adds our independent models at 0.15 behind a watchdog that falls back to (1).
 The licence-clean pair (P 0.938, blend-i 0.939) is the hedge only if prize eligibility ever matters; it does
 not at this rank. The selection itself is the user's, on the My Submissions page, by 2026-10-22.
+
+### Phase 10 opens: a frozen-feature factory, and its rules registered before the first push (2026-10-06)
+
+**Plan** (`ai/plans/2026-10-06-phase10-plan.md`, approved by the user 2026-10-06). The 0.943 entries are the floor and are
+untouched. The new bet: our studies are already prepped (6 slots x 9 windows at 336px, ~44 present images per study), so
+a large **frozen** backbone costs one forward pass per image, once; the features are cached (~0.5 GB per backbone) and
+heads, targets, seeds and denoising become minutes of CPU instead of 5-8 GPU-hours per decision. Decisions recorded:
+licence route reopened (DINOv3 allowed; nothing built here can ship in a CC-BY-NC 4.0 release), public LB used for
+pre-registered candidates only (a band written first, at most one submission each, no tuning on it), team merge kept open
+for the user to decide by Oct 14. Honest odds written in the plan: LB >= 0.947 about 20-25%, top 20 about 5%, first
+place solo about 1-2%.
+
+**Code (test-first, 299 tests):** `knee/features.py` (`PooledBackbone`: CLS + mean of patch tokens, registers excluded,
+ImageNet normalisation inside; `extract_study_features`: absent slots never run through the backbone and exactly zero;
+a pickle-free cache whose uid order is checked on load), `knee/feature_head.py` (the trained members' own attention
+readout `KneeModel._attend` on cached features; random 5-of-9 windows at train, the fixed spread at eval; masked features
+zeroed inside the head). An equivalence test pins the head's logits to `KneeModel`'s on identical features.
+
+**Pilot kernel `phase10-features-pilot` (200 studies, DINOv3 ViT-L/16 at 336px, offline from the Kaggle Model
+`unmol03/dinov3-vit-large/pytorch/default/1`, MIT).** Pass conditions, registered now:
+1. the checkpoint loads with `strict=True` into timm's `vit_large_patch16_dinov3` (no silent random init: a missing or
+   unexpected key stops the run and is printed);
+2. all features finite in fp16, and different studies' features differ (mean between-study cosine below the
+   within-study one);
+3. measured throughput projects **<= 2.5 h for the 4,407-study corpus and <= 0.6 h for ~1,300 test studies** per backbone;
+   otherwise the backbone drops to 224px or to ViT-B before any corpus extraction is paid for.
+
+**Gate G1 (the decision this track lives or dies on), registered before any head is trained.** Five-fold heads on the
+cached DINOv3-L features, three-source blend target, gold excluded from every split, read at nine windows, folds
+`primary_v3`. **Pass if pooled OOF >= 0.870 standalone, or the head added to the eight confirmed members gains
+>= +0.0025 with the paired CI above zero** (d3 at 224 is 0.8781; the eight together 0.8842; a different family may pass on
+gain alone, as c3 did). **Fail:** try a partial unfreeze through cached intermediate tokens; if that also fails, the track
+stops and the 0.943 entries are the final candidates.
