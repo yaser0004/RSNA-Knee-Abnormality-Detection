@@ -4419,3 +4419,20 @@ is reported beside it. Member gain is that arm added as a ninth member to the ei
 (`c2, c3, f1, s2, t2, a2, d3, d3_336`), probability mean, `paired_macro_auc_delta` on the saved fixed truth.
 No hyperparameter is tuned after seeing a result; if G1 fails, the next move is the one registered (partial unfreeze), not
 a retune of these arms.
+
+### The corpus cache extracted; it cannot be downloaded here, so Gate G1 runs on Kaggle (2026-10-06)
+
+`knee-phase10-features-dinov3l` completed (DINOv3 ViT-L/16 at 336px, all 4,407 studies; `feat_dinov3l_336.npz`, ~975 MB).
+**Pulling it to this machine failed:** six CLI attempts broke after 0.4-178 MB (the CLI fetches each file with one
+non-resumable GET, so a dropped connection restarts from zero), and a resumable ranged downloader built for the purpose got
+~20 MB in 11 minutes (every attempt died after 1-12 MB), i.e. about 8 hours. Two process errors worth recording: my retry
+loop's success test checked only that the output file *existed*, which a zero-byte placeholder satisfies, so it printed
+"ok" after a failed pull (the empty file was caught by looking at its size, not by the loop); and the loop must test size.
+
+**Consequence: Gate G1 moves to a Kaggle kernel (`knee-phase10-g1`) next to the cache.** Nothing in the rule changes: the
+two head arms, the standardisation, the window handling, the target (steven_v4 + ours + lixin73 from the confirm
+kernel's own cell), the hash-pinned `primary_v3` folds, the gold handling and the reading rule are exactly those registered
+on 2026-10-06; the training core is the same code as the local harness `ai/scratch/phase10-g1/g1.py`, and only the
+loading cell differs. Only the small prediction arrays (~1 MB) come back, and the member-gain arithmetic against the
+eight confirmed members runs locally as registered (`member_gain.py`, whose assertions check row order, truth and gold
+order against the members before any number is read).
