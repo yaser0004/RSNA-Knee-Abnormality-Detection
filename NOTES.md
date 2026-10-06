@@ -4397,3 +4397,25 @@ registered before the push:
 
 **Next:** the corpus extraction kernel (all 4,407 studies, in parts of ~1,100 so a late failure loses at most one part), then
 Gate G1 exactly as registered on 2026-10-06.
+
+### Gate G1 harness: the two head arms and the reading rule, registered before the cache lands (2026-10-06)
+
+G1's registered rule (pooled OOF >= 0.870 standalone, or member gain >= +0.0025 with the CI above zero on the eight confirmed
+members) said "heads on cached features" without fixing the head. A linear readout on frozen features may understate them,
+so **two arms are run, and both are reported:**
+
+- **A, linear:** `FeatureHead(2048)`, the trained members' own readout, on standardised tokens.
+- **B, adapter:** a per-token `Linear(2048, 512) + GELU + Dropout(0.3)` in front of `FeatureHead(512)`.
+
+Common to both, fixed now: tokens standardised with the training fold's per-feature mean and std (absent slots stay zero);
+input dropout 0.2; five random windows of nine per study per step (an independent draw per study), eval at all nine windows
+**and** at the fixed five (0,2,4,6,8); three-source blend target (steven_v4 + ours + lixin73, built as the Phase 8 confirm
+kernels build it); `masked_bce_loss`; Adam, OneCycle max lr 3e-3, 30 epochs, batch 64, seed 0; folds `primary_v3` with the
+58 gold studies out of every split; gold scored as the confirm kernels do (each fold's model predicts the gold studies, the
+five predictions averaged).
+
+**The gate reads the arm with the higher pooled OOF at nine windows** (a choice between two arms, declared here); the other
+is reported beside it. Member gain is that arm added as a ninth member to the eight nine-group arrays
+(`c2, c3, f1, s2, t2, a2, d3, d3_336`), probability mean, `paired_macro_auc_delta` on the saved fixed truth.
+No hyperparameter is tuned after seeing a result; if G1 fails, the next move is the one registered (partial unfreeze), not
+a retune of these arms.
