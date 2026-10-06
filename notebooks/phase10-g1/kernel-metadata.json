@@ -1,0 +1,26 @@
+{
+ "id": "mohammadyaserhussain/knee-phase10-g1",
+ "title": "knee-phase10-g1",
+ "code_file": "knee-phase10-g1.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "true",
+ "enable_tpu": "false",
+ "enable_internet": "false",
+ "machine_shape": "NvidiaTeslaT4",
+ "dataset_sources": [
+  "mohammadyaserhussain/rsna-knee-src",
+  "stevenleehans/rsna-knee-llm-report-labels",
+  "pilkwang/rsna-knee-llm-labels",
+  "lixin73/rsna-knee-llm-report-labels-sol56"
+ ],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [
+  "mohammadyaserhussain/knee-phase3-label-consume",
+  "mohammadyaserhussain/knee-phase10-features-dinov3l"
+ ],
+ "model_sources": []
+}
