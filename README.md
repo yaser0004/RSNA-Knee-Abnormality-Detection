@@ -47,7 +47,10 @@ because their licences conflict with the CC-BY-NC 4.0 winner release, audit in `
 alone. On 2026-10-04 the licence route was reopened by decision: the full public stack, unmodified
 (the excluded members included, so it cannot ship in a CC-BY-NC 4.0 winner release), scored **0.943** (rank
 about 1,100 behind its 717 ties), and the same stack with our d3 at 0.15 weight also scored **0.943**.
-Findings and every band read against its score are in `NOTES.md`; plans in `ai/plans/`.**
+**Phase 10** (2026-10-06) tested the one remaining new lever, frozen large-backbone features cached once and read by cheap
+heads (`src/knee/features.py`, `feature_head.py`, `notebooks/phase10-*`): DINOv3 ViT-L at 336px scored **0.8076** pooled OOF
+against 0.8781 for our fine-tuned d3 and added +0.0004 as a ninth member, so Gate G1 failed and the track stopped after ~2.5
+GPU-hours. Findings and every band read against its score are in `NOTES.md`; plans in `ai/plans/`.**
 
 **Where we actually stand.** On 2026-09-18 the field was 3,959 teams: 1st **0.957**, median **0.913**,
 our 0.921 at rank **1,789**. The spikes grew — 538 teams at exactly 0.941, 321 at 0.936 — so 0.942 ranks

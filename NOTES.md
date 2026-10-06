@@ -4436,3 +4436,41 @@ on 2026-10-06; the training core is the same code as the local harness `ai/scrat
 loading cell differs. Only the small prediction arrays (~1 MB) come back, and the member-gain arithmetic against the
 eight confirmed members runs locally as registered (`member_gain.py`, whose assertions check row order, truth and gold
 order against the members before any number is read).
+
+### Gate G1 FAILED: frozen DINOv3-L features score 0.8076 pooled OOF and add +0.0004 as a ninth member (2026-10-06)
+
+`knee-phase10-g1` (Kaggle, T4; both arms in ~100 s each once the 975 MB cache was loaded), five folds of `primary_v3`, gold out of
+every split, three-source blend target, scored against steven_v4 binarised. Rows and truth checked identical to the eight
+confirmed members by `member_gain.py` before any number was read.
+
+| arm | OOF, 9 windows | OOF, 5 windows | gold, 9 / 5 | as a ninth member (OOF) | (gold) |
+|---|---|---|---|---|---|
+| **A, linear** (read by the gate) | **0.8076** | 0.7979 | 0.8271 / 0.8141 | **+0.0004 [+0.0000, +0.0007]** | -0.0011 [-0.0050, +0.0028] |
+| B, adapter | 0.8050 | 0.7954 | 0.8073 / 0.8039 | +0.0002 [-0.0001, +0.0005] | -0.0019 [-0.0049, +0.0013] |
+
+Per label (A, OOF 9 windows): ACL 0.779, MCL 0.737, Medial Meniscus 0.807, Lateral Meniscus 0.737, Medial OA 0.856, Lateral OA 0.818,
+PF OA 0.798, Effusion 0.838, Synovitis 0.876, Baker's 0.819, Contusion 0.791, Fracture 0.835.
+
+**Against the registered rule** (pass: pooled OOF >= 0.870, or member gain >= +0.0025 with the CI above zero): standalone
+0.8076 is 0.062 short; member gain +0.0004 is a sixth of the bar. **G1 fails on both routes.**
+
+- It is not an optimiser artefact: the linear and the MLP-adapter arms land within 0.003 of each other (0.8076 / 0.8050), so
+  the limit is the representation. Our fine-tuned d3 at 224px, same target, same folds, same windows, scores 0.8781, 0.07 higher.
+  CLS plus the mean of the patch tokens throws away the spatial layout that localised findings (a meniscus tear, a cruciate
+  fibre) live in, and a backbone pretrained on natural images does not encode them in the global token.
+- **The registered fallback (partial unfreeze via cached intermediate tokens) is infeasible by storage arithmetic, so it is not
+  built:** one image is 446 tokens x 1,024 features x 2 bytes = 0.9 MB, ~190,000 present images in the corpus = ~170 GB, against
+  a cache that already cannot be moved to this machine at 975 MB, and it would need the same on Kaggle's 20 GB output limit.
+  Training the last blocks end to end instead costs ~12 GPU-h per fold. The rule said the track stops if the fallback fails;
+  it fails on feasibility, so **the frozen-feature track stops here.**
+- **Why even the gate's bar was low:** a member helps the 0.943 stack only if it is itself near 0.94 on the LB. A model at
+  pooled OOF 0.870 maps to an LB near 0.915-0.920 on our own history (G: OOF 0.8874 -> LB 0.928), so a G1 pass would
+  still not have produced a member worth blending. The bar tested whether the family was worth more screening, not whether
+  it would reach the stack.
+- **Cost, as designed:** the track spent ~1.5 GPU-h on extraction, ~0.3 h on the pilot and ~0.5 h on G1 (about 2.5 GPU-h in all,
+  against ~55 GPU-h left in the window), and the plan's stop rule ended it before any submission slot or blend was spent.
+
+**Where the project stands after Phase 10:** public LB **0.943** (full public stack, unmodified; with our d3 at weight 0.15, also
+0.943). Nothing measured here improves it: own fine-tuned members (0.928 standalone), label sources, a fourth label source, blend
+weights, and now frozen large-backbone features. The remaining distance to the 0.95+ teams is not closable by anything this hardware
+and the measured levers can reach in 16 days.
