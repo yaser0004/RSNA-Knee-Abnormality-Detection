@@ -4681,3 +4681,30 @@ Lateral Meniscus 0.145, Medial OA 0.159, Lateral OA 0.088, PF OA 0.184, Effusion
 Local dry run of arms c and d's target path (CPU): blend4 (steven_v4 + ours + lixin73 + Claude-corpus) differs from blend3 by a mean |p| of 0.0274; the 0.5 soft bootstrap
 runs; the loader returns 30-wide labels and a matching 30-wide weight row (1.0 for the 12 scored labels, 0.3 for the atoms); gold rows carry NaN atoms and are excluded from
 training. Arms c and d are ready; they wait for the GPU quota reset (2026-10-10 00:00 UTC), after arm b's second seed.
+
+### TPU fold farm: what was built, and the readout registered before the first session (2026-10-08)
+
+**Why.** `quota_view()` shows GPU 6 h/window (spent until 2026-10-10 00:00 UTC) and TPU 20 h/window (unused). The first TPU probe (171 s) showed 8 chips (`xla:0..7`), torch_xla 2.8.0, jax 0.11,
+timm 1.0.30, a 224-core / 377 GB host. The d3 recipe's per-fold cost (~1.1 h on a T4) means GPU alone affords roughly one five-fold config for the rest of the competition; a TPU session
+can run eight independent jobs at once (one per chip, **no gradient sharing**, so each job keeps the GPU recipe's batch 8, Adam, OneCycle and BatchNorm semantics).
+
+**Code, test-first (324 tests on CPU):**
+- `knee/masked_bn.py` + `KneeModel.enable_static_shapes()`: the packed forward (absent slots removed, a data-dependent shape XLA would recompile per batch) becomes a fixed-shape forward whose
+  BatchNorm statistics weight each image by presence, with absent features zeroed. Tests pin it to the packed model on a **training step: loss, the gradients of 100+ parameters, and every BatchNorm
+  running statistic** (the ones inference uses), on eval logits, on independence from padding content, on an empty batch (running stats do not move), and on checkpoint compatibility (same
+  state_dict keys, loads into an ordinary KneeModel).
+- `knee/xla_train.py`: `masked_bce_loss_static` (no boolean indexing), `TensorAdam` (lr and beta1 as device tensors, so a per-step schedule does not recompile), `one_cycle_schedule` (taken from the real
+  `OneCycleLR`, including its 0.95 -> 0.85 -> 0.95 beta1 cycle). Tests: equal to `masked_bce_loss`, and `TensorAdam` follows `torch.optim.Adam` + `OneCycleLR` within 1e-6 over 30 steps.
+- `knee/tpu_farm.py`: one job per chip via `torch_xla.launch`; inputs as JSON + CSV (no pickle); outputs per job: checkpoint (cut to the 12 scored labels), val/gold predictions at 5 and 9 groups, a
+  summary. **End-to-end CPU test: a checkpoint trained through the farm path, loaded into an ordinary packed KneeModel, reproduces the farm's own validation predictions within 1e-4.**
+- Not testable off-TPU: `torch_xla.launch`, `MpDeviceLoader`, `torch.autocast('xla')`, bf16 numerics, real compile time and speed. `knee-phase11-tpu-probe2` (queued) measures steps/s per chip and checks the
+  launch / ordinal / autocast calls on a static-shape EfficientNet before the farm is pushed.
+
+**First farm session (`knee-phase11-tpu-farm1`, eight jobs, fold 0 unless stated):** `b_s0_f0`, `b_s1_f0`, `b_s0_f1..f4` (arm b, the soft bootstrap), `c_s0_f0` (Claude in the blend), `d_s0_f0` (plus atoms).
+Rules registered now:
+1. **Does the TPU reproduce the GPU?** `b_s0_f0` against the GPU run of the same job (val vs steven_v4 truth at nine groups 0.8976, gold 0.9135): reproduction = val within +-0.006 (the seed spread seen
+   between two runs of one config is ~0.004) and gold within +-0.02. Outside that, the TPU recipe differs (bf16, masked BN) and the cause is found before any TPU model is trusted.
+2. **One LB read of a TPU-trained fold-0 checkpoint** (`b_s0_f0`, decision read 3 of 8; GPU twin scored 0.922): band **0.915-0.929**. This is the test that a TPU-trained checkpoint works in the
+   unchanged inference kernel. A score below 0.915 means TPU training hurts.
+3. **Seed 1 of arm b** is `b_s1_f0`; the registered promotion bar (mean of two seeds' LB reads >= 0.920 with gold delta >= 0) is read on the GPU seed 0 (0.922) and this one (decision read 4).
+4. **Arms c and d** are read against `b_s0_f0` (TPU) on gold and on the collapse check; an LB read (reads 5, 6) only for an arm whose gold delta against b is >= 0. The cap of 8 reads for the phase stands.
