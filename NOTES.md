@@ -4582,3 +4582,102 @@ single labeller by macro AUC (0.8953 vs steven_v4 0.8927), but n=58 cannot separ
 
 **Consequence (as registered):** the corpus is relabelled with the same two passes and the same frozen prompt. N1 arm c =
 soft bootstrap on blend4 (blend3 + Claude mean); arm d adds the 18 atoms as auxiliary heads. The prompt is not revised.
+
+### N1 anchor scored 0.916; corpus relabel switches to a single pass because of the usage limit (2026-10-07)
+
+**Anchor: 0.916** (submission 56899076; d3's fold-0 checkpoint alone). Band 0.912-0.926: inside, at the low end, as one fold of
+one config should be. Decision read 1 of 8. Every N1 arm is read against this 0.916.
+
+**Corpus relabel: single pass (Sonnet), a deviation from the registered two-pass plan.** The first wave (9 subagents, ~190k tokens
+each) hit the account's session usage limit and killed 8 of them mid-write; the full corpus at two passes is ~13 M tokens. So the
+corpus is labelled with **pass 1 only**. This is a post-hoc variant, stated as such: the gate was registered on the two-pass mean
+(+0.0259 [+0.0086, +0.0431]); re-running the same rule on pass 1 alone gives **blend3 + Claude-pass-1 minus blend3 = +0.0201
+[+0.0043, +0.0374]**, also above zero, and it is the only variant evaluated (no further forks on the 58 gold). Pass-2 outputs for
+chunks 0000 and 0002 exist and are NOT used, so every study gets the same labeller. The prompt is unchanged.
+
+### N1 arm b read: collapse PASS, gold +0.0030; LB band registered (2026-10-07)
+
+`knee-phase11-screen-b-s0` (d3's config, fold 0, seed 0, target 0.5 x blend3 + 0.5 x teacher8 OOF), read by the registered rule:
+1. **Collapse check: PASS.** Arm against its own target 0.9550, d3 fold 0 against the blend 0.8912. (Weak as a check: the target
+   contains the teacher, which is the same model family, so a high number is easy. It guards against a collapsed student only.)
+2. **Gold: 0.9105 -> 0.9135, +0.0030 [-0.0106, +0.0144].** Point estimate >= 0, CI wide as expected at n=58.
+3. Val against steven_v4 (not a criterion): 0.8852 -> 0.8976, +0.0124 [+0.0084, +0.0164]. The mix pulls the student toward the
+   teacher, which was trained toward steven's blend, and the teacher's OOF came from folds that saw fold 0 (the leakage note), so
+   this number is optimistic and is NOT evidence of a gain.
+Per label (gold): Synovitis 0.7443 -> 0.7527, Fracture 0.9389 -> 0.9125 (the one drop), the other ten flat or up.
+
+**LB read (decision read 2 of 8): `knee-phase11-submit-b-s0`, arm b's fold-0 checkpoint alone at nine groups, against the 0.916
+anchor.** Band: **0.915-0.925**. Promotion rule as registered: **>= 0.920 (anchor + 0.004) with gold delta >= 0 -> second seed, bar
+re-read on the mean of both seeds**; 0.916-0.919 = no demonstrated gain (the arm is not promoted, a second seed would not change
+that); <= 0.914 = the bootstrap hurts. Seed 1 of the same arm is launched in parallel because the GPU lane is idle (its 1.5 h
+is the only thing risked; it is read only if seed 0 clears 0.920).
+
+### Corpus labeller fallback: muse-spark via opencode, C1 registered, gold run blocked (2026-10-07)
+
+Claude subagents hit the account's session limit twice (19 of 37 corpus chunks done). The user directed that labelling be offloaded to cloud models through
+`opencode` (never the local entries). The host's thread 733965 permits external LLMs for label extraction if the service is accessible and low-cost; free
+models qualify. Caveat: a "contributor-free" model likely retains prompts; only report text is sent (no images, no labels).
+
+**Smoke test (run after the user's explicit approval):** `opencode/muse-spark-1.3-contributor-free`, 4 gold reports, the frozen prompt (sha256 44f2ceea...),
+31 s, 4/4 valid rows by `parse_label_line`. **The 58-report gold run was then denied by the auto-mode classifier** (data exfiltration) despite the user's
+"proceed"; it has NOT been run and was not retried by any other route. It needs the user to add a Bash permission rule for `opencode run` (or run it themselves).
+
+**Gate C1 for this labeller, registered before any 58-report output exists:** label the 58 gold reports once with the frozen prompt
+(`label_opencode.py`, batches of 10; a uid missing after one retry stays NaN and counts as a wrong cell); score with `score_c1_model.py`. Primary statistic:
+cell agreement with gold, paired study bootstrap (10,000), **blend3 + this labeller as a fourth source minus blend3; pass = CI above zero.** One run, no prompt
+revision, no selection among several models on gold (a second model would be a new registered gate). If it passes: the remaining chunks (0019-0036) are
+labelled by it, and a cross-check on one Claude-labelled chunk (cell agreement between the two labellers, no gold) is reported before the corpus is assembled;
+the corpus then has two labellers (Claude 0000-0018, this one for the rest), recorded as such.
+
+### Gate C1 PASSED for muse-spark: blend3 + labeller +0.0230 [+0.0043, +0.0417] (2026-10-07)
+
+After the user added a project-scoped permission rule (`.claude/settings.local.json`, two scripts only), the 58 gold reports were labelled once with
+`opencode/muse-spark-1.3-contributor-free` and the frozen prompt: 58/58 rows. Registered rule (paired study bootstrap, 10,000, cell agreement):
+
+| source | cell agreement | macro AUC (gold) |
+|---|---|---|
+| blend3 | 0.8333 | 0.8852 |
+| muse-spark alone | 0.8405 | 0.8679 |
+| **blend3 + muse-spark** | **0.8563** | 0.8888 -> 0.8863 |
+
+- muse-spark minus blend3 alone: +0.0072 [-0.0187, +0.0330], not a pass on its own (as for Claude: it is a fourth voice, not a replacement).
+- **blend3 + muse-spark minus blend3: +0.0230 [+0.0043, +0.0417], PASS.** (Claude pass 1 on the same rule: +0.0201 [+0.0043, +0.0374].)
+- Per label it is weaker than Claude on Synovitis (0.73 vs 0.80) and Contusion (0.79 vs 0.85) and better on Fracture (0.85, below Claude's 0.87-0.90).
+
+Next, as registered: a cross-check on Claude-labelled corpus chunk 0000 (cell agreement between the two labellers, no gold), reported before any
+corpus assembly; then chunks 0019-0036 are labelled by muse-spark.
+
+### Cross-check muse-spark vs Claude on corpus chunk 0000, no gold: 98.5% cell agreement (2026-10-07)
+
+Both labellers on the same 120 unseen studies, each cell thresholded at 0.5: **agreement 0.9854**; mean |p difference| 0.038. Per-label prevalence
+agrees closely (e.g. Medial Meniscus 0.383 vs 0.358, Effusion 0.233 vs 0.200, Baker's 0.025 vs 0.058, Fracture 0.033 vs 0.033); lowest per-label agreement is Effusion
+(0.950). Rank correlations are 0.51-0.92 (low where positives are rare: Fracture 0.51, MCL 0.54). No systematic offset, so the two labellers are mixed in the corpus
+as registered: **Claude for chunks 0000-0018, muse-spark for 0019-0036** (muse-spark outputs in `out_corpus/muse_spark/`, one file per chunk).
+
+### N1 arm b scored 0.922 vs the 0.916 anchor: +0.006, promoted to a second seed (2026-10-07)
+
+Submission 56912716 (`knee-phase11-submit-b-s0`: arm b's fold-0 checkpoint alone, nine groups). **LB 0.922**, band 0.915-0.925 (inside). Against the anchor
+(0.916, the same config and fold with the plain blend3 target): **+0.006**, over the registered +0.004 bar, and gold delta was +0.0030 (>= 0). Per the rule the arm
+is promoted **to a second seed, not to a five-fold run yet**: +0.004 is at the seed-noise floor (Screen A: +0.0036 between two runs of one config), so the bar is re-read on
+the mean of two seeds' LB reads. Decision reads used: 2 of 8. Seed 1 (`knee-phase11-screen-b-s1`) errored at Kaggle start-up with no log on its first push; re-pushed.
+
+### Kaggle GPU quota is exhausted until 2026-10-10 00:00 UTC; the empty-log kernel errors were the quota (2026-10-07)
+
+`kaggle`'s `api.quota_view()` (the CLI has no `quota view` subcommand; the Python API does) returned at 15:40 UTC: **GPU timeUsed 36,104 s (10.0 h) against totalTimeAllowed 21,600 s
+(6 h), quotaRefreshTime 2026-10-10T00:00:00Z; TPU timeUsed 0 of 72,000 s (20 h), `hasEverRun: false`.** `knee-phase11-screen-b-s1` errored three times within minutes
+of starting (v1, v2, and v3 as a byte-for-byte copy of the working s0 notebook with only name and seed changed) with an empty log and `failureMessage: null`: a
+session that is over quota is started and killed with no message. So the code was never the cause, and the three versions cost no GPU time (nothing ran). Two corrections
+to earlier planning: (1) the Phase 10 plan's "~20 h left in this window" was stale; the window was spent by 2026-10-07 (Phase 9 and 10 runs plus this phase's anchor, arm b, and
+visible submit runs); (2) the allowance this account sees is 6 h, not the 30 h per window the earlier plans assumed. **Check `quota_view()` before every GPU push from here on.**
+Consequence: no GPU kernel (training or a submission kernel's visible run) can run before 2026-10-10 00:00 UTC. Seed 1 of arm b, arms c and d, and every N2 run wait for the
+reset, in that order. The TPU pool (20 h, never used) is available now; whether a PyTorch/XLA port of the d3 recipe is feasible is the open question for the gap.
+
+### The Claude-label corpus is assembled and uploaded (2026-10-07)
+
+`ai/scratch/phase11-claude-labels/assemble.py`: 4,349 corpus studies, 12 labels + 18 atoms, no missing or unparsed cell, no gold study; **two labellers recorded in
+`labeller_manifest.csv`: claude-sonnet-5-5 for 2,280 studies (chunks 0000-0018, pass 1 only) and `opencode/muse-spark-1.3-contributor-free` for 2,069 (0019-0036)**.
+Uploaded as the private dataset `mohammadyaserhussain/rsna-knee-phase11-claude-labels` (`claude_labels.csv`). Corpus prevalence: ACL 0.125, MCL 0.043, Medial Meniscus 0.371,
+Lateral Meniscus 0.145, Medial OA 0.159, Lateral OA 0.088, PF OA 0.184, Effusion 0.207, Synovitis 0.156, Baker's 0.115, Contusion 0.146, Fracture 0.052.
+Local dry run of arms c and d's target path (CPU): blend4 (steven_v4 + ours + lixin73 + Claude-corpus) differs from blend3 by a mean |p| of 0.0274; the 0.5 soft bootstrap
+runs; the loader returns 30-wide labels and a matching 30-wide weight row (1.0 for the 12 scored labels, 0.3 for the atoms); gold rows carry NaN atoms and are excluded from
+training. Arms c and d are ready; they wait for the GPU quota reset (2026-10-10 00:00 UTC), after arm b's second seed.
