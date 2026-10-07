@@ -2,6 +2,8 @@ import timm
 import torch
 import torch.nn as nn
 
+from knee.masked_bn import convert_masked_bn, image_weights
+
 
 class KneeModel(nn.Module):
     """Phase 1 baseline: single 2D backbone applied per slice, mean-pooled
@@ -20,6 +22,7 @@ class KneeModel(nn.Module):
                                           num_classes=0, **backbone_kwargs)
         self.head_kind = head
         self.num_labels = num_labels
+        self.static_shapes = False
         n_features = self.backbone.num_features
         self.head = nn.Linear(n_features, num_labels)
         if head in ("slot_attention", "group_attention"):
@@ -30,6 +33,11 @@ class KneeModel(nn.Module):
             self.label_readout = nn.Parameter(torch.empty(num_labels, n_features))
             nn.init.normal_(self.label_readout, std=n_features ** -0.5)
             self.label_bias = nn.Parameter(torch.zeros(num_labels))
+
+    def enable_static_shapes(self) -> None:
+        """Train and evaluate with a data-independent shape (needed on XLA/TPU); see knee.masked_bn."""
+        convert_masked_bn(self.backbone)
+        self.static_shapes = True
 
     def forward(self, x: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
         """`x` is either [batch, n_images, 3, H, W] (the Phase 2 flat volume) or
@@ -88,6 +96,12 @@ class KneeModel(nn.Module):
         if present is None:
             return self.backbone(images)
         keep = present.reshape(-1)
+        if self.static_shapes:
+            # fixed shape for XLA: every image goes through, BatchNorm's statistics see only the
+            # present ones, and absent positions are zeroed, as the packed path leaves them
+            with image_weights(self.backbone, keep):
+                out = self.backbone(images)
+            return out * keep.unsqueeze(-1).to(out.dtype)
         if not keep.any():
             return images.new_zeros(images.shape[0], self.backbone.num_features)
         kept = self.backbone(images[keep])

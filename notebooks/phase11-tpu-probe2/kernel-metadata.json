@@ -1,0 +1,15 @@
+{
+ "id": "mohammadyaserhussain/knee-phase11-tpu-probe2",
+ "title": "knee-phase11-tpu-probe2",
+ "code_file": "knee-phase11-tpu-probe2.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "false",
+ "enable_tpu": "true",
+ "enable_internet": "false",
+ "dataset_sources": [],
+ "competition_sources": [],
+ "kernel_sources": [],
+ "model_sources": []
+}

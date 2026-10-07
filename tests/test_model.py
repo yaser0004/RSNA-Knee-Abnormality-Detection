@@ -364,3 +364,89 @@ def test_keep_labels_rejects_asking_for_more_labels_than_the_model_has():
                       head="group_attention").state_dict()
     with pytest.raises(ValueError):
         keep_labels(state, 13)
+
+
+# --- static shapes for XLA: masked BatchNorm must equal packing ------------------------------
+
+
+def _twin_models(head="group_attention"):
+    torch.manual_seed(0)
+    packed = KneeModel(backbone_name="efficientnet_b0", num_labels=12, pretrained=False, head=head)
+    static = KneeModel(backbone_name="efficientnet_b0", num_labels=12, pretrained=False, head=head)
+    static.load_state_dict(packed.state_dict())
+    static.enable_static_shapes()
+    return packed, static
+
+
+def _padded_batch():
+    torch.manual_seed(1)
+    x = torch.rand(3, 4, 2, 3, 48, 48)
+    mask = torch.tensor([[True, True, False, True], [True, False, False, False], [False, True, True, True]])
+    x[~mask] = 0.0  # an absent slot arrives as zeros, as the dataset emits it
+    return x, mask
+
+
+def test_static_shape_training_step_matches_the_packed_one():
+    from knee.train import masked_bce_loss
+    packed, static = _twin_models()
+    x, mask = _padded_batch()
+    y = torch.rand(3, 12)
+    packed.train()
+    static.train()
+    loss_p = masked_bce_loss(packed(x, mask=mask), y)
+    loss_s = masked_bce_loss(static(x, mask=mask), y)
+    loss_p.backward()
+    loss_s.backward()
+
+    assert torch.allclose(loss_p, loss_s, atol=1e-5)
+    compared = 0
+    for (name, a), (_, b) in zip(packed.named_parameters(), static.named_parameters()):
+        assert (a.grad is None) == (b.grad is None), name  # e.g. the unused mean-pool head
+        if a.grad is not None:
+            assert torch.allclose(a.grad, b.grad, atol=2e-4, rtol=1e-3), name
+            compared += 1
+    assert compared > 100  # the backbone's convolutions and norms were actually compared
+    # the running statistics are what inference uses; a drift here would not show in the loss
+    for (name, a), (_, b) in zip(packed.named_buffers(), static.named_buffers()):
+        assert torch.allclose(a.float(), b.float(), atol=1e-5, rtol=1e-4), name
+
+
+def test_static_shape_eval_matches_packed_eval_and_ignores_the_padding():
+    packed, static = _twin_models()
+    x, mask = _padded_batch()
+    packed.eval()
+    static.eval()
+    with torch.no_grad():
+        ref = packed(x, mask=mask)
+        out = static(x, mask=mask)
+        x_noise = x.clone()
+        x_noise[~mask] = torch.rand_like(x_noise[~mask])  # garbage where nothing is present
+        out_noise = static(x_noise, mask=mask)
+
+    assert torch.allclose(ref, out, atol=1e-5)
+    assert torch.allclose(out, out_noise, atol=1e-6)
+
+
+def test_static_shape_training_ignores_padding_content_and_survives_an_empty_batch():
+    _, static = _twin_models()
+    x, mask = _padded_batch()
+    static.train()
+    a = static(x, mask=mask)
+    x_noise = x.clone()
+    x_noise[~mask] = torch.rand_like(x_noise[~mask])
+    b = static(x_noise, mask=mask)
+    assert torch.allclose(a, b, atol=1e-5)
+
+    before = {k: v.clone() for k, v in static.state_dict().items() if "running" in k}
+    empty = static(torch.zeros_like(x), mask=torch.zeros_like(mask))
+    assert torch.isfinite(empty).all()
+    for k, v in static.state_dict().items():
+        if "running" in k:
+            assert torch.equal(v, before[k]), f"{k} moved on a batch with nothing present"
+
+
+def test_static_shape_checkpoint_loads_into_an_ordinary_model():
+    packed, static = _twin_models()
+    fresh = KneeModel(backbone_name="efficientnet_b0", num_labels=12, pretrained=False, head="group_attention")
+    fresh.load_state_dict(static.state_dict())
+    assert set(static.state_dict()) == set(packed.state_dict())
