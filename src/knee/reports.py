@@ -436,3 +436,27 @@ def blend_sources(sources: list[pd.DataFrame], labels: list[str]) -> pd.DataFram
             warnings.simplefilter("ignore", RuntimeWarning)
             blend[label] = np.nanmean(stack, axis=0)
     return blend
+
+
+def soft_bootstrap(target: pd.DataFrame, teacher: pd.DataFrame, alpha: float,
+                   forbidden_uids) -> pd.DataFrame:
+    """(1 - alpha) * target + alpha * teacher, per study and label, over the target's studies.
+
+    The teacher is an ensemble's out-of-fold probabilities: where the extracted labels are
+    wrong, the image models are often closer to the radiologists than the labels are, so a
+    soft mix lets the student learn from both. A study without a teacher row keeps its
+    target; a NaN target stays NaN, so `masked_bce_loss` still skips what no source rated.
+
+    `forbidden_uids` are the gold studies. A teacher that predicted them as training rows
+    would carry their labels into the student, so their presence is an error."""
+    if not 0.0 <= alpha <= 1.0:
+        raise ValueError(f"alpha must be in [0, 1], got {alpha}")
+    leaked = set(map(str, teacher.index)) & set(map(str, forbidden_uids))
+    if leaked:
+        raise ValueError(f"teacher has {len(leaked)} forbidden (gold) studies")
+    values = teacher.reindex(columns=target.columns).to_numpy(float)
+    if np.isnan(values).any() or (values < 0).any() or (values > 1).any():
+        raise ValueError("teacher probabilities must be finite and in [0, 1]")
+    aligned = teacher.reindex(index=target.index, columns=target.columns)
+    mixed = (1 - alpha) * target + alpha * aligned
+    return mixed.where(aligned.notna(), target)

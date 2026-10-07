@@ -4474,3 +4474,82 @@ PF OA 0.798, Effusion 0.838, Synovitis 0.876, Baker's 0.819, Contusion 0.791, Fr
 0.943). Nothing measured here improves it: own fine-tuned members (0.928 standalone), label sources, a fourth label source, blend
 weights, and now frozen large-backbone features. The remaining distance to the 0.95+ teams is not closable by anything this hardware
 and the measured levers can reach in 16 days.
+
+### Phase 11 opens: own weights only, a Claude relabel, and the teacher->student loop; Gate C1 registered (2026-10-07)
+
+**Field today:** main LB 1st **0.964** (Ilya Kolb; it was 0.961 on 10-05), top 20 >= 0.959; the Efficiency board's 1st is
+0.959 public. Our own best is G 0.928.
+
+**Two forum facts, read with `kaggle competitions topics show` (the Rules page is a JS app and does not load here):**
+- **Thread 733965 (host, 2026-08-09):** "submitting Competition Data, including report text, to an external LLM or API ... (for
+  example, extracting labels from reports) will not, by itself, be considered prohibited PRIVATE SHARING", subject to the service
+  being reasonably accessible and of minimal cost. The project's old rule (open-weight models only) was stricter than the
+  competition. The user approved relabelling via Claude in this workspace.
+- **Thread 744056 (open, no host answer):** whether a submission that ensembles other participants' public weights trained on the
+  competition data meets Rule 2.8 (a winner delivers training code and weights) and Rule 3.14.a (own original work). **Decision
+  (user, 2026-10-07): both finals use only weights we trained with our own code.** P (0.938) and the 0.943 stacks are out of
+  the finals unless the host rules otherwise.
+
+**Why the bet is the target, not the network (thread 735304, "Best single-model score"):** teams report single models at
+0.950-0.955 at 224px. The recurring recipe: teachers trained on several label sources, their OOF as soft pseudo-labels (a 50/50
+soft bootstrap with the labels), and students retrained on them. The public single-model recipe (Raptor CoAtNet-2 at 384)
+scores 0.924, the same tier as our d3. We have never run the loop. Plan: `ai/plans/2026-10-07-phase11-plan.md`.
+
+**Per-label weakness map (eight members, probability mean; d3 beside it):**
+
+| label | OOF 8 | gold 8 | gold d3 | gold positives |
+|---|---|---|---|---|
+| Synovitis | 0.9039 | **0.7395** | 0.7073 | 27 |
+| Lateral OA | 0.8541 | **0.8375** | 0.8337 | 11 |
+| PF OA | 0.8549 | **0.8404** | 0.8597 | 21 |
+| Lateral Meniscus | 0.8791 | **0.8621** | 0.8683 | 23 |
+| Fracture | 0.8936 | 0.9056 | 0.9278 | 18 |
+| MCL | 0.8376 | 0.9660 | 0.9592 | 9 |
+| (macro) | 0.8842 | 0.9114 | 0.9106 | |
+
+Synovitis is the weakest on gold for the models and for every label source (0.79 at best). Its OOF of 0.90 is against steven_v4,
+which shares the same misreading. So the target, not the image model, is the limit there.
+
+**Teacher array:** the eight-member OOF mean on the 4,349 report studies,
+`ai/scratch/phase11-step0/teacher8_oof.csv` (sha256 prefix 7d1b1a4b4595; asserted: no gold row, finite, folds `primary_v3` order).
+
+**Claude relabel: prompt frozen before any gold output exists.** `ai/scratch/phase11-claude-labels/prompt.md`, sha256
+`44f2ceead8783fc73f6d5f4960b07393c8e1e02a37ad948518b016a043a0804d`. It holds the host rubric verbatim, framed as "the probability
+that the MSK expert panel re-reading the images marked it positive"; it is zero-shot with no gold reports as examples, and it
+asks for 12 labels on a 9-step probability scale plus 18 auxiliary atoms and an evidence quote. Chunks carry uid and report only
+(`knee.claude_labels.write_report_chunks`; a test asserts that no label column is written). **If C1 fails, the prompt is not
+revised:** iterating it after reading gold would be tuning on gold.
+
+**Gate C1 (registered now):** two independent passes over the 58 gold reports (pass 1 Sonnet, pass 2 Opus, each in a fresh
+subagent that sees only the prompt and the chunk). Scorer: `ai/scratch/phase11-claude-labels/score_c1.py`. Primary statistic:
+cell agreement with gold, each source thresholded at 0.5, over 58 x 12 cells, with a paired CI by resampling studies (10,000).
+**Pass if the mean of the two passes beats the three-source blend (steven_v4 + ours + lixin73) with the CI above zero, or if the
+blend plus Claude as a fourth source beats the blend with the CI above zero.** Per-label and macro AUC are reported and do not
+decide. **Fail:** Claude labels are not used as a training target; the atoms may still be screened as auxiliary heads.
+
+### N1 control anchor: d3's fold-0 checkpoint alone, band registered (2026-10-07)
+
+`knee-phase11-submit-d3f0`: the submit-g notebook with one member, d3's fold-0 checkpoint (`d3_a2blend_grpattn_rndwin_fold0.pt`
+from `knee-phase8-confirm-d3`) read at nine groups. It costs no training; it is the LB anchor that every N1 fold-0 arm is read
+against (an arm promotes at >= anchor + 0.004 with gold delta >= 0, then gets a second seed). **Band: 0.912-0.926** (d3 + d3@336
+over five folds each is 0.928; one fold of one config should land a few thousandths lower). Outside the band means the
+single-fold path differs from the five-fold one in some way to find before any arm is read against it.
+This read is decision read 1 of the phase's cap of 8.
+
+### N1 arm b (soft bootstrap, alpha 0.5, seed 0): the readout, registered before the push (2026-10-07)
+
+`knee-phase11-screen-b-s0`: d3's confirm notebook unchanged except (1) the target is
+`soft_bootstrap(blend3, teacher8_oof, alpha=0.5, forbidden_uids=gold)` (mean |target change| 0.081 on the 4,407 rows, measured
+locally on the same files; prevalence rises 0.01-0.04 per label, since the teacher is less sparse than the binarised sources;
+gold rows unchanged), (2) fold 0 only, seed 0, (3) the fold-0 reads saved instead of the five-fold block. Control = d3's own fold-0
+predictions, already saved (same folds, same config, same windows).
+
+Read, in this order:
+1. **Collapse check:** the arm's val AUC against its own target (binarised at 0.5) >= d3 fold-0's val against the blend (binarised)
+   minus 0.01. Fail = the student did not learn its target; stop the arm.
+2. **Gold** (n=58, nine windows, study bootstrap 10,000): delta against d3's fold-0 gold read. Needed >= 0 by point estimate.
+3. **Val against steven_v4 truth** is reported and is **not** a criterion: for a changed target it is circular, and a drop there
+   is the expected signature of a target moving away from steven_v4.
+4. **LB:** a submission of the arm's fold-0 checkpoint (decision read 2 of 8), band written once (1) and (2) are known.
+   **Promote at LB >= d3f0 anchor + 0.004 with gold delta >= 0; then a second seed before any five-fold run**, the bar re-read
+   on the mean of the two seeds.

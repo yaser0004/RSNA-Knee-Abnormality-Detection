@@ -353,3 +353,47 @@ class TestFoldConfidence:
     def test_a_missing_confidence_counts_as_a_coin_flip(self):
         df = pd.DataFrame({"ACL": [1.0], "ACL__conf": [np.nan]}, index=["s1"])
         assert fold_confidence(df, ["ACL"]).loc["s1", "ACL"] == pytest.approx(0.5)
+
+
+def _frame(uids, value):
+    return pd.DataFrame({l: value for l in LABEL_COLUMNS}, index=pd.Index(uids, name="StudyInstanceUID"))
+
+
+def test_soft_bootstrap_mixes_target_and_teacher_on_shared_studies():
+    from knee.reports import soft_bootstrap
+    target = _frame(["a", "b"], 1.0)
+    teacher = _frame(["b", "a"], 0.2)
+
+    mixed = soft_bootstrap(target, teacher, alpha=0.5, forbidden_uids=[])
+
+    assert list(mixed.index) == ["a", "b"]
+    assert np.allclose(mixed.to_numpy(), 0.6)
+
+
+def test_soft_bootstrap_keeps_target_where_teacher_has_no_row_and_nan_stays_masked():
+    from knee.reports import soft_bootstrap
+    target = _frame(["a", "b"], 1.0)
+    target.loc["b", "ACL"] = np.nan
+    teacher = _frame(["b"], 0.0)
+
+    mixed = soft_bootstrap(target, teacher, alpha=0.5, forbidden_uids=[])
+
+    assert (mixed.loc["a"] == 1.0).all()
+    assert np.isnan(mixed.loc["b", "ACL"])
+    assert mixed.loc["b", "MCL"] == 0.5
+
+
+def test_soft_bootstrap_rejects_a_teacher_that_saw_gold_studies():
+    from knee.reports import soft_bootstrap
+    with pytest.raises(ValueError):
+        soft_bootstrap(_frame(["a"], 1.0), _frame(["a", "gold1"], 0.0), alpha=0.5, forbidden_uids=["gold1"])
+
+
+def test_soft_bootstrap_rejects_bad_alpha_and_teacher_values():
+    from knee.reports import soft_bootstrap
+    with pytest.raises(ValueError):
+        soft_bootstrap(_frame(["a"], 1.0), _frame(["a"], 0.0), alpha=1.5, forbidden_uids=[])
+    with pytest.raises(ValueError):
+        soft_bootstrap(_frame(["a"], 1.0), _frame(["a"], np.nan), alpha=0.5, forbidden_uids=[])
+    with pytest.raises(ValueError):
+        soft_bootstrap(_frame(["a"], 1.0), _frame(["a"], 1.2), alpha=0.5, forbidden_uids=[])
