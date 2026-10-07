@@ -341,3 +341,26 @@ def test_group_attention_never_runs_the_backbone_on_absent_slots():
     model(_packable_batch(n_groups=3), mask=PACK_MASK)
 
     assert [images.shape[0] for images in seen] == [int(PACK_MASK.sum()) * 3]
+
+
+def test_keep_labels_slices_an_auxiliary_model_to_the_scored_twelve_exactly():
+    from knee.model import keep_labels
+    torch.manual_seed(0)
+    wide = _stub_backbone(KneeModel(backbone_name="efficientnet_b0", num_labels=30, pretrained=False,
+                                    head="group_attention")).eval()
+    narrow = _stub_backbone(KneeModel(backbone_name="efficientnet_b0", num_labels=12, pretrained=False,
+                                      head="group_attention")).eval()
+    narrow.load_state_dict(keep_labels(wide.state_dict(), 12))
+    x = torch.rand(2, 3, 2, 3, 16, 16)
+    mask = torch.tensor([[True, True, False], [True, False, True]])
+
+    with torch.no_grad():
+        assert torch.allclose(narrow(x, mask=mask), wide(x, mask=mask)[:, :12], atol=1e-6)
+
+
+def test_keep_labels_rejects_asking_for_more_labels_than_the_model_has():
+    from knee.model import keep_labels
+    state = KneeModel(backbone_name="efficientnet_b0", num_labels=12, pretrained=False,
+                      head="group_attention").state_dict()
+    with pytest.raises(ValueError):
+        keep_labels(state, 13)

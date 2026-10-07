@@ -70,7 +70,8 @@ def augment_volume(volume: torch.Tensor) -> torch.Tensor:
     return (out * gain).clamp_(0.0, 1.0)
 
 
-def _lookup_weights(weights_df: pd.DataFrame, study_uid: str) -> torch.Tensor:
+def _lookup_weights(weights_df: pd.DataFrame, study_uid: str,
+                    columns: list[str] = LABEL_COLUMNS) -> torch.Tensor:
     """Per-label sample weights for one study, defaulting to 1.0.
 
     A study absent from the frame gets full weight, not zero: a missing row means
@@ -78,8 +79,8 @@ def _lookup_weights(weights_df: pd.DataFrame, study_uid: str) -> torch.Tensor:
     the loss. Zero would do exactly that, silently."""
     row = weights_df[weights_df["StudyInstanceUID"] == study_uid]
     if row.empty:
-        return torch.ones(len(LABEL_COLUMNS))
-    values = row[LABEL_COLUMNS].to_numpy(dtype="float32")[0]
+        return torch.ones(len(columns))
+    values = row[columns].to_numpy(dtype="float32")[0]
     return torch.nan_to_num(torch.tensor(values), nan=1.0)
 
 
@@ -339,7 +340,7 @@ class PreppedSlotDataset(Dataset):
         labels = _lookup_labels(self.labels_df, study_uid, self.label_columns)
         if self.weights_df is None:
             return image, mask, labels, study_uid
-        return image, mask, labels, _lookup_weights(self.weights_df, study_uid), study_uid
+        return image, mask, labels, _lookup_weights(self.weights_df, study_uid, self.label_columns), study_uid
 
     def _select_groups(self, slices: list[np.ndarray]) -> list[np.ndarray]:
         """Take n_groups groups from the ones stored, spread across the artifact's

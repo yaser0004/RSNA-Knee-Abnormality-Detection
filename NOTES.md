@@ -4553,3 +4553,32 @@ Read, in this order:
 4. **LB:** a submission of the arm's fold-0 checkpoint (decision read 2 of 8), band written once (1) and (2) are known.
    **Promote at LB >= d3f0 anchor + 0.004 with gold delta >= 0; then a second seed before any five-fold run**, the bar re-read
    on the mean of the two seeds.
+
+### Gate C1 PASSED: Claude as a fourth source raises the blend's gold agreement by +0.026 (2026-10-07)
+
+Two independent passes over the 58 gold reports with the frozen prompt (sha256 44f2ceea...), each in a fresh subagent that
+saw only the prompt and the uid + report chunk. Both passes: 58/58 rows, uids in input order, 0 unparseable cells. Cost:
+~127k (Sonnet) and ~149k (Opus) subagent tokens for 58 reports.
+
+| source | cell agreement | macro AUC (gold) | Synovitis | Lateral OA | Fracture |
+|---|---|---|---|---|---|
+| steven_v4 | 0.8175 | 0.8927 | 0.79 | 0.83 | 0.79 |
+| ours (Qwen3-4B) | 0.7888 | 0.8616 | 0.74 | 0.81 | 0.82 |
+| lixin73 | 0.8161 | 0.8488 | 0.70 | 0.82 | 0.77 |
+| **blend3** (the current target) | 0.8333 | 0.8852 | 0.77 | 0.82 | 0.77 |
+| Claude pass 1 (Sonnet) | 0.8477 | 0.8950 | 0.80 | 0.86 | 0.87 |
+| Claude pass 2 (Opus) | 0.8405 | 0.8847 | 0.74 | 0.81 | 0.90 |
+| Claude mean | 0.8448 | **0.8953** | 0.78 | 0.84 | 0.90 |
+| **blend3 + Claude** | **0.8592** | 0.8888 | 0.77 | 0.83 | 0.81 |
+
+Registered rule (paired study bootstrap, 10,000):
+- Claude mean minus blend3: +0.0115 [-0.0172, +0.0402], not a pass on its own.
+- **blend3 + Claude minus blend3: +0.0259 [+0.0086, +0.0431], PASS.**
+
+Reading: as a fourth voice, Claude corrects the blend where the three sources share an error. As a sole source it is the best
+single labeller by macro AUC (0.8953 vs steven_v4 0.8927), but n=58 cannot separate those two. Fracture is the clearest gain
+(0.90 vs 0.77-0.79), consistent with the prompt's "acute only" instruction. Synovitis stays the weakest for every source
+(<= 0.80).
+
+**Consequence (as registered):** the corpus is relabelled with the same two passes and the same frozen prompt. N1 arm c =
+soft bootstrap on blend4 (blend3 + Claude mean); arm d adds the 18 atoms as auxiliary heads. The prompt is not revised.

@@ -691,3 +691,24 @@ def test_slot_dataset_wide_labels_are_nan_for_a_study_missing_from_the_frame(tmp
 
     assert labels.shape == (12,)
     assert torch.isnan(labels).all()
+
+
+def test_weights_follow_a_wider_label_table(tmp_path):
+    """Auxiliary heads widen the target past the twelve labels; the weight row must widen with it,
+    or masked_bce_loss would get a weight tensor of the wrong shape."""
+    uid = _slot_artifact(tmp_path, filled=("SAG_FLUID",))
+    columns = LABEL_COLUMNS + ["atom:a", "atom:b"]
+    labels = pd.DataFrame([[uid] + [1.0] * len(columns)], columns=["StudyInstanceUID"] + columns)
+    weights = pd.DataFrame([[uid] + [1.0] * len(LABEL_COLUMNS) + [0.3, np.nan]],
+                           columns=["StudyInstanceUID"] + columns)
+
+    _, _, y, w, _ = PreppedSlotDataset([uid], tmp_path, labels_df=labels, weights_df=weights,
+                                       label_columns=columns, n_groups=2, out_size=8)[0]
+
+    assert y.shape == w.shape == (len(columns),)
+    assert w[-2] == pytest.approx(0.3) and w[-1] == 1.0
+
+    _, _, _, w_absent, _ = PreppedSlotDataset(
+        [uid], tmp_path, labels_df=labels, label_columns=columns, n_groups=2, out_size=8,
+        weights_df=pd.DataFrame(columns=["StudyInstanceUID"] + columns))[0]
+    assert torch.allclose(w_absent, torch.ones(len(columns)))

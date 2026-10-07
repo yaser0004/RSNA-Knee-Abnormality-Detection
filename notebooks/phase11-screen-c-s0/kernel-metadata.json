@@ -1,0 +1,31 @@
+{
+ "id": "mohammadyaserhussain/knee-phase11-screen-c-s0",
+ "title": "knee-phase11-screen-c-s0",
+ "code_file": "knee-phase11-screen-c-s0.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "true",
+ "enable_tpu": "false",
+ "enable_internet": "true",
+ "machine_shape": "NvidiaTeslaT4",
+ "dataset_sources": [
+  "lixin73/rsna-knee-llm-report-labels-sol56",
+  "mohammadyaserhussain/rsna-knee-phase11-claude-labels",
+  "mohammadyaserhussain/rsna-knee-phase11-teacher",
+  "mohammadyaserhussain/rsna-knee-src",
+  "pilkwang/rsna-knee-llm-labels",
+  "stevenleehans/rsna-knee-llm-report-labels"
+ ],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [
+  "mohammadyaserhussain/knee-phase7-prep9-shard0",
+  "mohammadyaserhussain/knee-phase7-prep9-shard1",
+  "mohammadyaserhussain/knee-phase7-prep9-shard2",
+  "mohammadyaserhussain/knee-phase7-prep9-shard3",
+  "mohammadyaserhussain/knee-phase3-label-consume"
+ ],
+ "model_sources": []
+}

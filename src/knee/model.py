@@ -170,3 +170,21 @@ class KneeModel(nn.Module):
             weights = self._attend(tokens, present)[1]
             return weights.view(x.shape[0], x.shape[1], x.shape[2], self.num_labels)
         return self._attend(self._slot_features(x, mask), mask)[1]
+
+
+def keep_labels(state_dict: dict, n_labels: int) -> dict:
+    """A checkpoint trained with auxiliary outputs, cut to its first `n_labels` outputs.
+
+    Every head parameter has the label as its leading axis, and the attention heads score and
+    read out each label independently, so the first rows of a wider model are exactly a
+    `num_labels=n_labels` model: the auxiliary rows shaped the shared backbone in training and
+    are dropped at inference without changing the scored logits."""
+    sliced = dict(state_dict)
+    for key in ("head.weight", "head.bias", "slot_scores.weight", "slot_scores.bias",
+                "label_readout", "label_bias"):
+        if key not in sliced:
+            continue
+        if sliced[key].shape[0] < n_labels:
+            raise ValueError(f"{key} has {sliced[key].shape[0]} labels, fewer than {n_labels}")
+        sliced[key] = sliced[key][:n_labels].clone()
+    return sliced
