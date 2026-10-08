@@ -4708,3 +4708,15 @@ Rules registered now:
    unchanged inference kernel. A score below 0.915 means TPU training hurts.
 3. **Seed 1 of arm b** is `b_s1_f0`; the registered promotion bar (mean of two seeds' LB reads >= 0.920 with gold delta >= 0) is read on the GPU seed 0 (0.922) and this one (decision read 4).
 4. **Arms c and d** are read against `b_s0_f0` (TPU) on gold and on the collapse check; an LB read (reads 5, 6) only for an arm whose gold delta against b is >= 0. The cap of 8 reads for the phase stands.
+
+### TPU probe 2: `torch_xla.launch` fails on Kaggle's TPU VM; the farm launches independent per-chip processes instead (2026-10-08)
+
+`knee-phase11-tpu-probe2` ran after a ~7 h queue (pushed 22:20 UTC Oct 7, ran ~05:20 UTC Oct 8; 67 s wall, TPU quota used 274 s in all). `torch_xla.launch(fn)` over 8 processes died with
+**`TPU initialization failed: Invalid --..._slice_builder_worker_addresses specified. Expected 8 worker addresses, got 1.`**: the container's TPU topology variables describe one process
+(`tpu_process_addresses="local"`, seen as a warning in probe 1), while the launcher declares eight. The single-process, eight-device mode did work in probe 1 (8 `xla:N` devices, a matmul). So
+probe 2 produced no speed number. **Also learned: only one batch TPU session can exist at a time ("Maximum batch TPU session count of 1 reached"), and a TPU queue wait is ~7 h**, so every TPU
+attempt must be informative: the next one is the real work, written to adapt.
+`tpu_farm.launch_per_chip` starts one plain process per job with `TPU_VISIBLE_CHIPS=<rank>` and a 1x1x1 process topology (three variants tried in order, from ports + addresses down to
+visible-chips-only); the first variant in which any worker brings its chip up is kept; if none does, up to two jobs run in one default-environment process (the probe-1 mode) so the session still returns
+a result and a timing. The per-variant outcome is written to `launcher.json`. CPU tests pin the variant order, the per-rank chip/port uniqueness, and the capped fallback with a stub worker
+(333 tests). The readout rules registered for the first farm session (above) stand unchanged.

@@ -6,11 +6,13 @@ What changes is only what XLA requires: fixed shapes (masked BatchNorm in place 
 slots, a static loss, padded evaluation batches), device-tensor optimiser hyperparameters, and
 bfloat16 autocast. Chips do not talk to each other, so a failed job costs only itself.
 
-Run on the TPU VM as `python -m knee.tpu_farm <inputs_dir> <out_dir>`. Without torch_xla the same
+Run on the TPU VM as `python -m knee.tpu_farm <inputs_dir> <out_dir>` (workers: `--worker <inputs_dir> <out_dir> <rank>`). Without torch_xla the same
 code runs the jobs one after another on CPU, which is what the tests do.
 """
 import contextlib
 import json
+import os
+import subprocess
 import sys
 import time
 import traceback
@@ -31,7 +33,6 @@ from knee.xla_train import TensorAdam, masked_bce_loss_static, one_cycle_schedul
 try:
     import torch_xla
     import torch_xla.distributed.parallel_loader as parallel_loader
-    import torch_xla.runtime as xla_runtime
     XLA = True
 except ImportError:
     XLA = False
@@ -227,8 +228,8 @@ def load_inputs(directory) -> dict:
                 npz_root=raw["npz_root"], settings=raw["settings"], **labels)
 
 
-def _worker(index, inputs_dir, out_dir):
-    rank = xla_runtime.global_ordinal() if XLA else index
+def _worker(rank, inputs_dir, out_dir):
+    """Run job `rank` (CPU tests call this directly; on a TPU, `_run_one_chip` does)."""
     inputs = load_inputs(inputs_dir)
     jobs = inputs["jobs"]
     if rank >= len(jobs):
@@ -240,14 +241,93 @@ def _worker(index, inputs_dir, out_dir):
         print(f"[{jobs[rank]['name']}] FAILED\n{traceback.format_exc()}", flush=True)
 
 
+# torch_xla.launch (multi-process) fails on Kaggle's TPU VM: "Expected 8 worker addresses, got 1"
+# (probe 2, 2026-10-08), because the container's TPU topology variables describe one process. The
+# workers here are therefore independent processes, each told it owns exactly one chip.
+CHIP_VARIANTS = ("one_chip_ports", "one_chip", "visible_only")
+
+
+def chip_env(variant: str, rank: int, base_port: int = 8476, metrics_port: int = 8431) -> dict:
+    """Environment that makes a process see only chip `rank` as its whole 1x1x1 slice."""
+    if variant not in CHIP_VARIANTS:
+        raise ValueError(f"unknown variant {variant!r}")
+    if not 0 <= rank < 8:
+        raise ValueError(f"a v5e-8 host has chips 0..7, got {rank}")
+    env = {"TPU_VISIBLE_CHIPS": str(rank)}
+    if variant in ("one_chip_ports", "one_chip"):
+        env.update(TPU_CHIPS_PER_PROCESS_BOUNDS="1,1,1", TPU_PROCESS_BOUNDS="1,1,1")
+    if variant == "one_chip_ports":
+        port = base_port + rank
+        env.update(TPU_PROCESS_PORT=str(port), TPU_PROCESS_ADDRESSES=f"localhost:{port}", CLOUD_TPU_TASK_ID="0",
+                   TPU_RUNTIME_METRICS_PORTS=str(metrics_port + rank))
+    return env
+
+
+def _run_one_chip(inputs_dir, out_dir, rank):
+    """Worker process: bring the device up, say so, then train job `rank`."""
+    torch.zeros(1, device=_device()).cpu()
+    Path(out_dir, f"ready_{rank}").write_text("1")
+    _worker(rank, inputs_dir, out_dir)
+
+
+def _default_cmd(inputs_dir, out_dir, rank):
+    return [sys.executable, "-m", "knee.tpu_farm", "--worker", str(inputs_dir), str(out_dir), str(rank)]
+
+
+def launch_per_chip(inputs_dir, out_dir, n_jobs, fallback_jobs=2, ready_timeout=300, worker_cmd=_default_cmd):
+    """Start one worker per job, trying chip-environment variants until some workers initialise.
+
+    A worker that cannot attach to its chip dies within a minute or two; one that attaches writes
+    ready_<rank>. The first variant with any ready worker is kept and run to completion. If none
+    works, up to `fallback_jobs` jobs run one after another in a single default-environment process
+    (the mode that worked in probe 1), so the session still returns something. Returns a report."""
+    out = Path(out_dir)
+    report = []
+    for variant in CHIP_VARIANTS:
+        procs = [subprocess.Popen(worker_cmd(inputs_dir, out_dir, rank), env={**os.environ, **chip_env(variant, rank)})
+                 for rank in range(n_jobs)]
+        deadline = time.time() + ready_timeout
+        while time.time() < deadline:
+            time.sleep(1)
+            up = [r for r in range(n_jobs) if (out / f"ready_{r}").exists()]
+            if len(up) + sum(p.poll() is not None and not (out / f"ready_{r}").exists()
+                             for r, p in enumerate(procs)) >= n_jobs:
+                break
+        up = [r for r in range(n_jobs) if (out / f"ready_{r}").exists()]
+        report.append(dict(variant=variant, up=up))
+        print(f"[launcher] {variant}: {len(up)}/{n_jobs} workers initialised", flush=True)
+        if up:
+            for p in procs:
+                p.wait()
+            break
+        for p in procs:
+            p.kill()
+            p.wait()
+        time.sleep(5)
+    else:
+        ran = []
+        for rank in range(min(fallback_jobs, n_jobs)):
+            done = subprocess.run(worker_cmd(inputs_dir, out_dir, rank), env=dict(os.environ))
+            if (out / f"ready_{rank}").exists():
+                ran.append(rank)
+            print(f"[launcher] single-process fallback, job {rank}: exit {done.returncode}", flush=True)
+        report.append(dict(variant="single_process_default", up=ran))
+    (out / "launcher.json").write_text(json.dumps(report))
+    return report
+
+
 def main(inputs_dir, out_dir):
     Path(out_dir).mkdir(parents=True, exist_ok=True)
+    n_jobs = len(load_inputs(inputs_dir)["jobs"])
     if XLA:
-        torch_xla.launch(_worker, args=(inputs_dir, out_dir))
+        print("[launcher]", json.dumps(launch_per_chip(inputs_dir, out_dir, n_jobs)), flush=True)
     else:
-        for index in range(len(load_inputs(inputs_dir)["jobs"])):
-            _worker(index, inputs_dir, out_dir)
+        for rank in range(n_jobs):
+            _worker(rank, inputs_dir, out_dir)
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2])
+    if sys.argv[1] == "--worker":
+        _run_one_chip(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+    else:
+        main(sys.argv[1], sys.argv[2])
