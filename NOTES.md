@@ -4720,3 +4720,37 @@ attempt must be informative: the next one is the real work, written to adapt.
 visible-chips-only); the first variant in which any worker brings its chip up is kept; if none does, up to two jobs run in one default-environment process (the probe-1 mode) so the session still returns
 a result and a timing. The per-variant outcome is written to `launcher.json`. CPU tests pin the variant order, the per-rank chip/port uniqueness, and the capped fallback with a stub worker
 (333 tests). The readout rules registered for the first farm session (above) stand unchanged.
+
+### GPU quota reset confirmed; TPU farm cause found; arms b-s1, c, d readouts registered (2026-10-10)
+
+`quota_view()` at 2026-10-10 ~00:10 UTC: GPU timeUsed 0 s, totalTimeAllowed 21,600 s (6 h), next refresh 2026-10-17 00:00 UTC; TPU timeUsed 0 s of 72,000 s.
+Farm1 v2 produced a log (v1 had none): `ModuleNotFoundError: pydicom` in cell 1 on the TPU image, i.e. a plain missing package, not a TPU problem. Fixed by a
+guarded `pip install` (pydicom, timm, scikit-learn, torchvision==0.23.0 --no-deps if missing) in cell 1; v3 re-pushed. Probe 1 and 2 are COMPLETE.
+
+Registered before the pushes (decision reads stay at <= 8; 2 used):
+- **b-s1** (arm b, seed 1, GPU): read as the registered second seed. Read 3 is its fold-0 checkpoint on the LB, band **0.915-0.927**. Arm b is promoted to N2 iff
+  mean(0.922, this read) >= 0.920 and gold delta (seed 1 vs d3 fold 0) >= 0; otherwise not promoted (point of the rule: +0.004 is near the seed floor).
+- **c** (blend4 = blend3 + Claude/muse labels, same soft bootstrap) and **d** (c + 18 atom heads at 0.3): collapse check as for b; gold delta vs arm b seed 0 read with a
+  study bootstrap. An LB read is spent only if gold delta >= 0, band **0.915-0.930**; the arm replaces b for N2 iff its LB >= mean(b seeds) + 0.003 and gold >= b's.
+  Otherwise b stays the N2 target.
+
+### TPU farm1 worked; seed 1 and arm c read on gold; two LB reads registered (2026-10-11)
+
+**Farm1 v3 (8 jobs, one per chip, launcher variant `one_chip_ports`, all 8 chips up): 21 min per job, ~139 s/epoch, 0.39 h wall for eight fold-trainings, 1.36 h of TPU quota
+including setup.** (Queue wait was the real cost.) Rule 1 (reproduction): TPU `b_s0_f0` val 0.8954 vs GPU 0.8976 (-0.0022), gold 0.9086 vs 0.9135 (-0.0049), mean per-label
+prediction correlation 0.984 -> **REPRODUCES**, so TPU-trained folds are admissible members (the checkpoints load in the ordinary packed KneeModel).
+Farm results (g9): arm b folds 0-4 val 0.8954/0.8848/0.8842/0.8969/0.8869; gold 0.9086/0.9085/0.9068/0.9034/0.9100; arm b x5 pooled OOF vs steven 0.8893 (d3 0.8781, circular),
+gold of the 5-fold mean 0.9114. b seed1 f0 0.8986 / gold 0.9070 (seed spread gold -0.0016 [-0.0103,+0.0071]). c f0 gold +0.0011 vs b, d f0 gold +0.0034 vs b (both CIs span 0).
+**GPU screens vs d3 fold 0 (gold 0.9105):** b-s1 collapse PASS, gold 0.9069 (**-0.0036** [-0.0140,+0.0055]); c-s0 collapse PASS, gold **0.9180 (+0.0075** [-0.0042,+0.0192]),
+val vs steven +0.0120 (circular). Gold n=58 cannot separate these; b's two-seed gold mean is ~0.
+
+**LB reads registered before the pushes (decision reads 3 and 4 of 8; used 2):**
+- Read 3 `knee-phase11-submit-b-s1` = GPU b-s1 fold-0 checkpoint alone, nine groups. Band **0.915-0.927**. Rule as registered: mean(0.922, this) >= 0.920 AND gold delta >= 0.
+  Gold mean of the two b seeds is ~-0.0003, so a pass needs this read >= 0.918 and I will state the gold caveat plainly; a read < 0.918 closes arm b as a seed-fragile gain.
+- Read 4 `knee-phase11-submit-c-s0` = GPU c-s0 fold-0 checkpoint alone (gold delta vs b-s0 +0.0045 >= 0, so a read is allowed). Band **0.915-0.930**. c replaces b as the N2 target iff
+  LB >= 0.925 (mean of the b seeds' reads + 0.003, with the b-s1 read in hand); between 0.920 and 0.925 b and c are tied and c wins on gold; < 0.920 b stays.
+
+### TPU farm2 queued: arms c and d, folds 1-4 (2026-10-11)
+Jobs `c_s0_f1..4`, `d_s0_f1..4` (seed 0) so that all three target arms (b, c, d) have five fold models on TPU. No LB read is spent on it. Readout (registered): pooled OOF per arm vs the
+d3 truth (circular, reported only), gold of each arm's 5-fold mean with a study bootstrap against arm b's (0.9114) and d3's, and the arms' fold-mean correlation. These models are also
+ensemble members and give the round-1 OOF for teacher round 2 (N3). `read_farm.py` reads b only; c/d pooling is added before the readout.

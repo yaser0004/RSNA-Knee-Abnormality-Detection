@@ -1,0 +1,22 @@
+{
+ "id": "mohammadyaserhussain/knee-phase11-submit-c-s0",
+ "title": "knee-phase11-submit-c-s0",
+ "code_file": "knee-phase11-submit-c-s0.ipynb",
+ "language": "python",
+ "kernel_type": "notebook",
+ "is_private": "true",
+ "enable_gpu": "true",
+ "enable_tpu": "false",
+ "enable_internet": "false",
+ "machine_shape": "NvidiaTeslaT4",
+ "dataset_sources": [
+  "mohammadyaserhussain/rsna-knee-src"
+ ],
+ "competition_sources": [
+  "rsna-knee-abnormality-detection"
+ ],
+ "kernel_sources": [
+  "mohammadyaserhussain/knee-phase11-screen-c-s0"
+ ],
+ "model_sources": []
+}
