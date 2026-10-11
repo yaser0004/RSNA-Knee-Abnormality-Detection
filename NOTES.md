@@ -4754,3 +4754,14 @@ val vs steven +0.0120 (circular). Gold n=58 cannot separate these; b's two-seed 
 Jobs `c_s0_f1..4`, `d_s0_f1..4` (seed 0) so that all three target arms (b, c, d) have five fold models on TPU. No LB read is spent on it. Readout (registered): pooled OOF per arm vs the
 d3 truth (circular, reported only), gold of each arm's 5-fold mean with a study bootstrap against arm b's (0.9114) and d3's, and the arms' fold-mean correlation. These models are also
 ensemble members and give the round-1 OOF for teacher round 2 (N3). `read_farm.py` reads b only; c/d pooling is added before the readout.
+
+### Reads 3 and 4 scored; arm c chosen as the N2 target (2026-10-11)
+
+LB (single fold-0 checkpoints, nine groups): anchor d3 0.916; **b seed 0 0.922; b seed 1 0.923 (read 3, band 0.915-0.927, inside); c seed 0 0.923 (read 4, band 0.915-0.930, inside).**
+Decision reads used: 4 of 8.
+- Arm b promotion rule: mean of the two seeds 0.9225 >= 0.920, both seeds +0.006/+0.007 over the anchor (about 3x the 0.0036 seed floor). Gold delta is +0.0030 / -0.0036 (mean ~0, n=58 cannot
+  resolve it); the registered caveat stands: the evidence is the LB agreement of two seeds, not gold. Arm b PROMOTED.
+- Arm c: 0.923 is inside the registered 0.920-0.925 tie band with b; the tie goes to the arm with the better gold (c +0.0075 vs d3 against b's mean ~0). **c is the N2 target.** It does not clear the
+  0.925 bar for "c beats b", so the Claude/muse labels are not shown to add LB on their own; they are kept because gold agrees in direction and C1 passed.
+- Arm d (GPU, gold +0.0043 vs d3, collapse PASS): no LB read spent (gold below c's). d stays a diversity member through its TPU folds.
+N2 = five-fold c on TPU: c folds 1-4 are in farm2 (queued), fold 0 exists on GPU and TPU. Next: pooled OOF/gold readout, then teacher round 2 (N3) from the c/d/b OOF.
