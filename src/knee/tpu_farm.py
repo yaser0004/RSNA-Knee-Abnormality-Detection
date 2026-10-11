@@ -244,6 +244,8 @@ def _worker(rank, inputs_dir, out_dir):
 # torch_xla.launch (multi-process) fails on Kaggle's TPU VM: "Expected 8 worker addresses, got 1"
 # (probe 2, 2026-10-08), because the container's TPU topology variables describe one process. The
 # workers here are therefore independent processes, each told it owns exactly one chip.
+# farm1 finished eight 21-minute jobs in 24 minutes; ~2.5x that is a hang, not a slow job
+RUN_TIMEOUT = 60 * 60
 CHIP_VARIANTS = ("one_chip_ports", "one_chip", "visible_only")
 
 
@@ -274,13 +276,16 @@ def _default_cmd(inputs_dir, out_dir, rank):
     return [sys.executable, "-m", "knee.tpu_farm", "--worker", str(inputs_dir), str(out_dir), str(rank)]
 
 
-def launch_per_chip(inputs_dir, out_dir, n_jobs, fallback_jobs=2, ready_timeout=300, worker_cmd=_default_cmd):
+def launch_per_chip(inputs_dir, out_dir, n_jobs, fallback_jobs=2, ready_timeout=300, worker_cmd=_default_cmd,
+                    run_timeout=None):
     """Start one worker per job, trying chip-environment variants until some workers initialise.
 
     A worker that cannot attach to its chip dies within a minute or two; one that attaches writes
     ready_<rank>. The first variant with any ready worker is kept and run to completion. If none
     works, up to `fallback_jobs` jobs run one after another in a single default-environment process
-    (the mode that worked in probe 1), so the session still returns something. Returns a report."""
+    (the mode that worked in probe 1), so the session still returns something. `run_timeout` (seconds, after
+    the workers are up) kills stragglers: a hung worker would otherwise hold the session until Kaggle's cap,
+    and a cancelled session saves no outputs at all (farm2, 2026-10-11). Returns a report."""
     out = Path(out_dir)
     report = []
     for variant in CHIP_VARIANTS:
@@ -297,8 +302,15 @@ def launch_per_chip(inputs_dir, out_dir, n_jobs, fallback_jobs=2, ready_timeout=
         report.append(dict(variant=variant, up=up))
         print(f"[launcher] {variant}: {len(up)}/{n_jobs} workers initialised", flush=True)
         if up:
-            for p in procs:
-                p.wait()
+            end = None if run_timeout is None else time.time() + run_timeout
+            for rank, p in enumerate(procs):
+                try:
+                    p.wait(timeout=None if end is None else max(end - time.time(), 0))
+                except subprocess.TimeoutExpired:
+                    p.kill()
+                    p.wait()
+                    Path(out_dir, f"timeout_{rank}.txt").write_text(f"killed after {run_timeout} s")
+                    print(f"[launcher] worker {rank} killed after the run timeout", flush=True)
             break
         for p in procs:
             p.kill()
@@ -320,7 +332,8 @@ def main(inputs_dir, out_dir):
     Path(out_dir).mkdir(parents=True, exist_ok=True)
     n_jobs = len(load_inputs(inputs_dir)["jobs"])
     if XLA:
-        print("[launcher]", json.dumps(launch_per_chip(inputs_dir, out_dir, n_jobs)), flush=True)
+        print("[launcher]", json.dumps(launch_per_chip(inputs_dir, out_dir, n_jobs, run_timeout=RUN_TIMEOUT)),
+              flush=True)
     else:
         for rank in range(n_jobs):
             _worker(rank, inputs_dir, out_dir)

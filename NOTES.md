@@ -4765,3 +4765,8 @@ Decision reads used: 4 of 8.
   0.925 bar for "c beats b", so the Claude/muse labels are not shown to add LB on their own; they are kept because gold agrees in direction and C1 passed.
 - Arm d (GPU, gold +0.0043 vs d3, collapse PASS): no LB read spent (gold below c's). d stays a diversity member through its TPU folds.
 N2 = five-fold c on TPU: c folds 1-4 are in farm2 (queued), fold 0 exists on GPU and TPU. Next: pooled OOF/gold readout, then teacher round 2 (N3) from the c/d/b OOF.
+
+### TPU farm2 hung and was stopped by the user; launcher now has a run timeout (2026-10-11)
+`knee-phase11-tpu-farm2` (c/d folds 1-4) ran 3.1 h of TPU against 1.29 h for farm1's identical recipe; the user pressed Stop session. A cancelled session saves no log and no outputs, so the cause is
+unknown (a stalled worker is the likely one; the launcher's `p.wait()` had no bound). TPU quota used for it: ~3.1 h (of 20). Fix: `launch_per_chip(..., run_timeout=3600)` kills any worker still running
+60 min after the chips are up and writes `timeout_<rank>.txt`, so the session ends normally and keeps the finished jobs' outputs (test added). The same eight jobs are re-pushed unchanged as farm2 v2.

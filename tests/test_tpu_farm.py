@@ -173,3 +173,17 @@ def test_launcher_falls_back_to_a_few_default_environment_jobs_when_no_variant_w
     report = launch_per_chip("in", out2, n_jobs=5, worker_cmd=_stub_cmd(tmp_path), ready_timeout=20, fallback_jobs=2)
     assert report[-1]["variant"] == "single_process_default" and report[-1]["up"] == [0, 1]
     assert sorted(p.name for p in out2.glob("ran_*")) == ["ran_0", "ran_1"]  # capped: not all five
+
+
+def test_a_hung_worker_is_killed_after_the_run_timeout(tmp_path, monkeypatch):
+    from knee.tpu_farm import launch_per_chip
+    hang = tmp_path / "hang.py"
+    hang.write_text("import sys, time\nfrom pathlib import Path\nout, rank = sys.argv[-2:]\n"
+                    "Path(out, f'ready_{rank}').write_text('1')\ntime.sleep(120 if rank == '1' else 0)\n")
+    out = tmp_path / "out"
+    out.mkdir()
+    cmd = lambda inputs, o, rank: [sys.executable, str(hang), o, str(rank)]
+    start = __import__("time").time()
+    report = launch_per_chip("in", out, n_jobs=2, worker_cmd=cmd, ready_timeout=20, run_timeout=3)
+    assert report[-1]["up"] == [0, 1] and __import__("time").time() - start < 60
+    assert (out / "timeout_1.txt").exists() and not (out / "timeout_0.txt").exists()
