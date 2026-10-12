@@ -12,6 +12,7 @@ code runs the jobs one after another on CPU, which is what the tests do.
 import contextlib
 import json
 import os
+import signal
 import subprocess
 import sys
 import time
@@ -276,6 +277,16 @@ def _default_cmd(inputs_dir, out_dir, rank):
     return [sys.executable, "-m", "knee.tpu_farm", "--worker", str(inputs_dir), str(out_dir), str(rank)]
 
 
+def _kill_group(proc):
+    """Kill a worker and its DataLoader children. A killed worker whose children survive keeps the
+    notebook's stdout pipe open, which would hang the parent after the timeout fired."""
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+    proc.wait()
+
+
 def launch_per_chip(inputs_dir, out_dir, n_jobs, fallback_jobs=2, ready_timeout=300, worker_cmd=_default_cmd,
                     run_timeout=None):
     """Start one worker per job, trying chip-environment variants until some workers initialise.
@@ -289,7 +300,8 @@ def launch_per_chip(inputs_dir, out_dir, n_jobs, fallback_jobs=2, ready_timeout=
     out = Path(out_dir)
     report = []
     for variant in CHIP_VARIANTS:
-        procs = [subprocess.Popen(worker_cmd(inputs_dir, out_dir, rank), env={**os.environ, **chip_env(variant, rank)})
+        procs = [subprocess.Popen(worker_cmd(inputs_dir, out_dir, rank), env={**os.environ, **chip_env(variant, rank)},
+                                  start_new_session=True)
                  for rank in range(n_jobs)]
         deadline = time.time() + ready_timeout
         while time.time() < deadline:
@@ -307,14 +319,12 @@ def launch_per_chip(inputs_dir, out_dir, n_jobs, fallback_jobs=2, ready_timeout=
                 try:
                     p.wait(timeout=None if end is None else max(end - time.time(), 0))
                 except subprocess.TimeoutExpired:
-                    p.kill()
-                    p.wait()
+                    _kill_group(p)
                     Path(out_dir, f"timeout_{rank}.txt").write_text(f"killed after {run_timeout} s")
                     print(f"[launcher] worker {rank} killed after the run timeout", flush=True)
             break
         for p in procs:
-            p.kill()
-            p.wait()
+            _kill_group(p)
         time.sleep(5)
     else:
         ran = []

@@ -4770,3 +4770,15 @@ N2 = five-fold c on TPU: c folds 1-4 are in farm2 (queued), fold 0 exists on GPU
 `knee-phase11-tpu-farm2` (c/d folds 1-4) ran 3.1 h of TPU against 1.29 h for farm1's identical recipe; the user pressed Stop session. A cancelled session saves no log and no outputs, so the cause is
 unknown (a stalled worker is the likely one; the launcher's `p.wait()` had no bound). TPU quota used for it: ~3.1 h (of 20). Fix: `launch_per_chip(..., run_timeout=3600)` kills any worker still running
 60 min after the chips are up and writes `timeout_<rank>.txt`, so the session ends normally and keeps the finished jobs' outputs (test added). The same eight jobs are re-pushed unchanged as farm2 v2.
+
+### TPU farm2 read: five folds of arms b, c, d (2026-10-13)
+
+Farm2 v2 COMPLETED normally: all 8 jobs ran (0.40 h of training), no `timeout_*`/`error_*` files, TPU quota charged 4,323 s. **Correction to the last entries:** the "hang" diagnoses were wrong. Kaggle showed the
+kernel as RUNNING for ~2.5 h and the quota counter climbed to 13,038 s during that time, then the charge dropped to the true 4,323 s on completion; the long RUNNING phase is Kaggle's
+post-run output handling, not a stalled worker. Farm2 v1 (stopped by the user at 3.1 h) was most probably the same and was probably healthy. Rule from here: **do not cancel a RUNNING TPU kernel
+on elapsed time; wait for COMPLETE/ERROR.** The launcher run_timeout and process-group kill stay (harmless, tested); the extra notebook watchdog (80 min after launch) is also kept.
+
+Pooled five-fold results (TPU, seed 0, g9; OOF against steven_v4 is circular for changed targets): d3 0.8781 | **b 0.8893, c 0.8894, d 0.8900** | gold of the 5-fold mean: **b 0.9114, c 0.9128, d 0.9112**
+(c - b +0.0014 [-0.0019,+0.0048]; d - b -0.0002 [-0.0081,+0.0078]) | **mean of b+c+d: OOF 0.8922, gold 0.9139.** The three targets are not distinguishable on gold; as members they are
+near-interchangeable, so c (chosen on the LB tie rule) stays the primary and b/d are diversity members.
+Saved: `source/checkpoints/oof_{b,c,d}_s0_g9.npy`, `gold_{b,c,d}_s0_g9.npy` (row order = d3 OOF uids).
