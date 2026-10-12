@@ -4782,3 +4782,12 @@ Pooled five-fold results (TPU, seed 0, g9; OOF against steven_v4 is circular for
 (c - b +0.0014 [-0.0019,+0.0048]; d - b -0.0002 [-0.0081,+0.0078]) | **mean of b+c+d: OOF 0.8922, gold 0.9139.** The three targets are not distinguishable on gold; as members they are
 near-interchangeable, so c (chosen on the LB tie rule) stays the primary and b/d are diversity members.
 Saved: `source/checkpoints/oof_{b,c,d}_s0_g9.npy`, `gold_{b,c,d}_s0_g9.npy` (row order = d3 OOF uids).
+
+### Teacher round 2 (N3): farm3 registered before the push (2026-10-13)
+
+Teacher 2 = mean of the five-fold OOF of arms b, c, d (pooled OOF vs steven 0.8922; per-label correlation with teacher 1 = 0.974, so round 2 moves the target only a little). Private dataset
+`rsna-knee-phase11-teacher` gets `teacher2_oof.csv` (4,349 corpus rows, no gold, finite, in (0,1)). Round-2 targets: `b2/c2/d2` = the same recipes with teacher 2 in place of teacher 1 (alpha 0.5).
+Farm3 jobs (8, one per chip): `c2_s0_f0..f4` (five-fold c2), `c2_s1_f0` (seed spread), `d2_s0_f0`, `b2_s0_f0`.
+**Readout:** (1) c2 vs c on fold 0 and on the pooled five folds, gold with a study bootstrap and val vs steven (circular); (2) seed 1 vs seed 0 of c2; (3) d2/b2 vs c2 on fold 0.
+**LB read 5 (only if c2 five-fold gold mean >= c's 0.9128 - 0.002):** `c2_s0_f0` alone at nine groups, band **0.918-0.932**; N3 stop rule as registered: a gain < 0.003 over c's 0.923 (i.e. read < 0.926)
+means round 2 is not worth another round and finals use round-1 students. Reads used: 4 of 8.
