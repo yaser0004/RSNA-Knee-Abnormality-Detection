@@ -4791,3 +4791,12 @@ Farm3 jobs (8, one per chip): `c2_s0_f0..f4` (five-fold c2), `c2_s1_f0` (seed sp
 **Readout:** (1) c2 vs c on fold 0 and on the pooled five folds, gold with a study bootstrap and val vs steven (circular); (2) seed 1 vs seed 0 of c2; (3) d2/b2 vs c2 on fold 0.
 **LB read 5 (only if c2 five-fold gold mean >= c's 0.9128 - 0.002):** `c2_s0_f0` alone at nine groups, band **0.918-0.932**; N3 stop rule as registered: a gain < 0.003 over c's 0.923 (i.e. read < 0.926)
 means round 2 is not worth another round and finals use round-1 students. Reads used: 4 of 8.
+
+## TPU farm3 v1 failed on a builder bug; v2 pushed (2026-10-14)
+
+farm3 v1 (round-2 students) ran about 82 minutes of setup and then stopped with `NameError: blend4` in the target cell. My builder only
+built the Claude-label block (`blend4`, `claude`, `atom_cols`) when a job targeted `c` or `d`; farm3 has only `b2`/`c2`/`d2` jobs, so the
+block was skipped and the round-2 block failed on its first use. No training had started. The TPU quota is about 3.9 h of 20 h used.
+Fix: the Claude block now also runs for `b2`, `c2` and `d2`. Checked before the push by running the target cell locally on synthetic
+inputs; it now builds `c2`, `d2` and `b2`. Same registered readout and gate as in the farm3 entry above; v2 was pushed 2026-10-14 05:00 IST
+and is QUEUED. Lesson: a new target name needs a local dry run of the target cell before the push, not only a compile.
