@@ -4877,3 +4877,12 @@ Reads used: 7 of 8 (anchor 0.916, b-s0 0.922, b-s1 0.923, c-s0 0.923, c2-s0 0.92
   to differ more, at 0.003 less on the public LB.
 - Not run: the gold-in-training treatment (58 studies at weight 3 per fold). With 58 studies against 4,349 the effective weight is about 4 percent, no read can validate it, and a retrain of 25 models would cost
   a TPU queue wait for an effect that cannot be measured. Documented as a decision, not a quota cut; the user can ask for it.
+
+### Host ruling in thread 744056: public weights are prize-eligible (found 2026-10-15)
+
+Chris Carr (RSNA Director of Informatics, "on behalf of RSNA"), 2026-10-14 13:20 UTC, in reply to the Rule 2.8 / 3.14.a question: the hosts "do not intend to discourage this practice or exclude competitors using it from receiving awards";
+**(1) submissions incorporating publicly shared weights are eligible for awards; (2) participants should include the shared weights and their source datasets in the list of resources included with their submissions.**
+This is the condition the 2026-10-07 decision waited on ("finals own-weights only, thread 744056 unresolved"), and Phase 11's plan says to revisit the P-based fallback if the host rules this way.
+Not settled by this ruling: the winner-licence question (thread 739905: CC BY-NC 4.0 vs an OSI licence; unanswered as of 2026-10-14 17:37 UTC), which is what excluded the DINOv3-derived and RadImageNet members from the "compliant" stack P.
+Scored entries available if the user lifts the own-weights-only rule: P (licence-compliant public stack) 0.938; P + d3 (blend-i) 0.939; full public stack 0.943 (includes licence-restricted members); own G / GS25 0.928.
+Nothing was changed on my side: the user's decision stands until the user revises it. The decision is the user's (finals are their click); it is put to them with this note.
