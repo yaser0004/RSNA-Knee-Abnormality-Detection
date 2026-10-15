@@ -4862,3 +4862,18 @@ Priors: G 0.928, S15 0.925, gold of the mix 0.9140 (G 0.9139): expect ~0.926-0.9
 - 0.924-0.932: composition is sound; the choice between G, S15 and GS25 is made on gold/OOF and the private-robustness argument, not on this read;
 - above 0.932: GS25 is pick 1.
 Reads used after this one: 7 of 8; one left.
+
+### Read 7 scored: GS25 = 0.928, inside its band, equal to G (2026-10-15)
+
+**GS25 (d3 + d3@336 + students b, c, d, 25 own-weights models): LB 0.928**, inside the registered band 0.924-0.932 ("composition is sound; choose on gold/OOF and private robustness, not on this read").
+It ties G (0.928, ten models) and sits +0.003 above S15 (0.925). Submitted 19:49 IST, scored by 22:25 IST: **hidden runtime of a 25-model submission is under 2.6 h end to end**, within the 6 h budget, and the score is a real
+number, not a blank/timeout (0 failed rows implied by a normal score; the notebook asserts 0 fallbacks).
+Reads used: 7 of 8 (anchor 0.916, b-s0 0.922, b-s1 0.923, c-s0 0.923, c2-s0 0.920, S15 0.925, GS25 0.928). One read left, reserved for a last sanity check of whatever is picked if it changes.
+
+**Finals recommendation (the user clicks):**
+- Candidates, all own-weights: G 0.928 (10 models), S15 0.925 (15 students), GS25 0.928 (25 models). Gold cannot separate them (0.9139 / 0.9127 / 0.9140, interval +-0.01).
+- **Pick 1: GS25.** It ties the best public score with the largest, most diverse ensemble (two configs, two label regimes), which is the better bet when the private set is 910 studies instead of 390.
+- **Pick 2: G (0.928)**, the older recipe on blend3 labels only. If the private labels punish the student targets, G is the hedge; if they reward them, GS25 carries it. S15 is the alternative to G when we want the two picks
+  to differ more, at 0.003 less on the public LB.
+- Not run: the gold-in-training treatment (58 studies at weight 3 per fold). With 58 studies against 4,349 the effective weight is about 4 percent, no read can validate it, and a retrain of 25 models would cost
+  a TPU queue wait for an effect that cannot be measured. Documented as a decision, not a quota cut; the user can ask for it.
