@@ -4886,3 +4886,9 @@ This is the condition the 2026-10-07 decision waited on ("finals own-weights onl
 Not settled by this ruling: the winner-licence question (thread 739905: CC BY-NC 4.0 vs an OSI licence; unanswered as of 2026-10-14 17:37 UTC), which is what excluded the DINOv3-derived and RadImageNet members from the "compliant" stack P.
 Scored entries available if the user lifts the own-weights-only rule: P (licence-compliant public stack) 0.938; P + d3 (blend-i) 0.939; full public stack 0.943 (includes licence-restricted members); own G / GS25 0.928.
 Nothing was changed on my side: the user's decision stands until the user revises it. The decision is the user's (finals are their click); it is put to them with this note.
+
+### Own-weights-only rule lifted by the user; finals set and resource list written (2026-10-16)
+
+User decision (2026-10-16): "Go with your recommendation, write the resource list." Finals: **pick 1 = P + d3 (blend-i, 0.939, submission 56819611)**, **pick 2 = GS25 (0.928, submission 57233603, own weights only)**. The full 0.943 stack is not used (DINOv3-derived and RadImageNet members conflict with the unresolved winner licence, thread 739905).
+The list the hosts asked for (shared weights and source datasets, with authors and upstream licences read from Kaggle on 2026-10-16) is `RESOURCES.md`. It is the text to paste into the description of each final.
+Still open: the blend-i hidden run depends on P's 6.3-7.3 h and the 8.0 h watchdog; it completed once, no new run is needed unless the composition changes. The user clicks the two finals on Kaggle. LB reads left: 1.
