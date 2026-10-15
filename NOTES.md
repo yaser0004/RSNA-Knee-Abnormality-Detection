@@ -4800,3 +4800,24 @@ block was skipped and the round-2 block failed on its first use. No training had
 Fix: the Claude block now also runs for `b2`, `c2` and `d2`. Checked before the push by running the target cell locally on synthetic
 inputs; it now builds `c2`, `d2` and `b2`. Same registered readout and gate as in the farm3 entry above; v2 was pushed 2026-10-14 05:00 IST
 and is QUEUED. Lesson: a new target name needs a local dry run of the target cell before the push, not only a compile.
+
+### TPU farm3 v2 read: round-2 students (2026-10-15)
+
+Farm3 v2 left the queue after about 20 h, ran to COMPLETE (RUNNING for about 9 h in Kaggle's status; training itself 0.40 h, all 8 jobs, no error or timeout files), and the earlier fix held.
+Readout script `ai/scratch/phase11-tpu/read_farm3.py`; arrays saved as `source/checkpoints/{oof,gold}_c2_s0_g9.npy`.
+
+| | c (round 1) | c2 (round 2) |
+|---|---|---|
+| pooled OOF vs steven (circular) | 0.8894 | 0.8891 |
+| gold, 5-fold mean | 0.9128 | **0.9148** |
+| gold fold 0 | 0.9096 | 0.9117 |
+
+- c2 - c on gold (5-fold mean): +0.0020 [-0.0028, +0.0069]; fold 0: +0.0020 [-0.0053, +0.0098]. Not distinguishable from zero, and smaller than the c2 seed spread
+  (c2 seed 1 on fold 0: 0.9076 vs 0.9117, -0.0041 [-0.0159, +0.0074]).
+- d2 vs c2 on fold 0: +0.0001; b2 vs c2: -0.0028. The three round-2 recipes are again interchangeable.
+- c2 OOF correlates 0.990 with teacher 2 (c: 0.996 with teacher 1). Round 2 changes the target little, so a gain is not expected to be large.
+- Gold of round-1 b+c+d mean 0.9139; c2 alone 0.9148; round-1 mean + c2 0.9130 (all within noise).
+- **Registered gate (c2 5-fold gold mean >= 0.9108): PASS (0.9148).**  The TPU checkpoint strict-loads into `KneeModel` on CPU (`weights_only=True`, all keys match).
+
+**LB read 5 (registered above, band 0.918-0.932):** `c2_s0_f0` alone at nine groups, from the farm3 kernel's output. Stop rule stays as registered: a read below 0.926 (gain < 0.003 over c's 0.923) means round 2
+is not worth another round and finals use round-1 students. Reads used after this one: 5 of 8.
