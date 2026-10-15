@@ -4851,3 +4851,14 @@ Gold (n=58, rank-mean of five-fold means): G 0.9139, S15 0.9127, G + S15 0.9140,
 Reads used: 6 of 8 (anchor 0.916, b-s0 0.922, b-s1 0.923, c-s0 0.923, c2-s0 0.920, S15 0.925).
 Consequence for the finals: the realistic own-weights level is 0.925-0.930 on the public LB; the 0.964 leaders are not reachable with this recipe family. Remaining reads are for the sanity check
 of the final composition (runtime, 0 fallbacks), not for new bets.
+
+### Finals composition candidate GS25 = G + S15, band registered before the push (2026-10-15)
+
+GS25: five equal-weight members: d3 (5 folds, 224), d3@336 (5 folds), and the student arms b, c, d (5 folds each): 25 own-weights models, all efficientnet_b0 group-attention trained by us.
+Kernel `knee-phase11-submit-gs25`, sources: `knee-phase8-confirm-d3`, `knee-phase9-confirm-d3-336`, `knee-phase11-tpu-farm1`, `knee-phase11-tpu-farm2`.
+Purpose: a banded sanity read of the composition that finals pick 1 would use, and the **hidden runtime and fallback count of a 25-model submission** (the budget is 6 h hidden, 0 fallbacks).
+Priors: G 0.928, S15 0.925, gold of the mix 0.9140 (G 0.9139): expect ~0.926-0.930. **Band 0.924-0.932.**
+- below 0.924: mixing hurts on the public LB; pick 1 stays G (0.928);
+- 0.924-0.932: composition is sound; the choice between G, S15 and GS25 is made on gold/OOF and the private-robustness argument, not on this read;
+- above 0.932: GS25 is pick 1.
+Reads used after this one: 7 of 8; one left.
