@@ -4828,3 +4828,15 @@ is not worth another round and finals use round-1 students. Reads used after thi
 Per the stop rule written before the push, round 2 gains < 0.003, so **N3 stops here: finals use round-1 students (b, c, d five-fold) and no round-2 loop.** This agrees with the gold readout
 (c2 - c +0.0020, interval spans zero, below the seed spread). The c2 models are kept only as optional extra ensemble members if gold/OOF later favours them; they are not preferred.
 Reads used: 5 of 8 (anchor 0.916, b-s0 0.922, b-s1 0.923, c-s0 0.923, c2-s0 0.920).
+
+### Finals candidate S15: round-1 student ensemble, band registered before the push (2026-10-15)
+
+With N3 stopped, the strongest own-weights candidate is the round-1 student ensemble **S15 = arms b, c, d x five folds each (15 models, seed 0, TPU-trained, nine groups at 224 px)**.
+Checkpoints: `b_s0_f{0..4}`, `c_s0_f{0..4}`, `d_s0_f{0..4}` from the farm1 and farm2 kernel outputs (`b_s1_f0` excluded; no round-2 model is used).
+Kernel `knee-phase11-submit-s15` (members b, c, d, each `n_ckpts=5`, equal member weight as in submit-g); kernel sources `knee-phase11-tpu-farm1` and `knee-phase11-tpu-farm2`.
+Evidence so far, all pre-LB: gold of the 15-model mean 0.9139 (G: d3 + d3@336 gold 0.9134); pooled OOF vs steven 0.8922 (circular for these targets); single folds on the LB 0.922-0.923 against d3 fold 0 at 0.916.
+**Band (LB read 6):** gold + the measured offset (+0.015 to +0.020) gives 0.929-0.934; the fold-0 gap over d3 (+0.007) with the d3 fold gain of about +0.010 gives about 0.933-0.937. Registered band **0.928-0.940**, centre ~0.934.
+- below 0.928: no gain over G in an ensemble ("saturated" again); finals fall back toward G plus students as diversity, decided on gold and OOF only;
+- 0.928-0.934: students at least match G, mixing G + S15 is the pick-2 question;
+- above 0.934: S15 is pick 1.
+Reads used after this one: 6 of 8.
