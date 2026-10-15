@@ -4821,3 +4821,10 @@ Readout script `ai/scratch/phase11-tpu/read_farm3.py`; arrays saved as `source/c
 
 **LB read 5 (registered above, band 0.918-0.932):** `c2_s0_f0` alone at nine groups, from the farm3 kernel's output. Stop rule stays as registered: a read below 0.926 (gain < 0.003 over c's 0.923) means round 2
 is not worth another round and finals use round-1 students. Reads used after this one: 5 of 8.
+
+### Read 5 scored: round 2 does not clear the bar; N3 stops (2026-10-15)
+
+`c2_s0_f0` alone (nine groups, own TPU-trained weights): **LB 0.920**, inside the registered band 0.918-0.932 but **below the 0.926 stop line** (c fold 0 scored 0.923; b-s0 0.922, b-s1 0.923).
+Per the stop rule written before the push, round 2 gains < 0.003, so **N3 stops here: finals use round-1 students (b, c, d five-fold) and no round-2 loop.** This agrees with the gold readout
+(c2 - c +0.0020, interval spans zero, below the seed spread). The c2 models are kept only as optional extra ensemble members if gold/OOF later favours them; they are not preferred.
+Reads used: 5 of 8 (anchor 0.916, b-s0 0.922, b-s1 0.923, c-s0 0.923, c2-s0 0.920).
