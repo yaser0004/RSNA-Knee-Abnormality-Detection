@@ -4840,3 +4840,14 @@ Evidence so far, all pre-LB: gold of the 15-model mean 0.9139 (G: d3 + d3@336 go
 - 0.928-0.934: students at least match G, mixing G + S15 is the pick-2 question;
 - above 0.934: S15 is pick 1.
 Reads used after this one: 6 of 8.
+
+### Read 6 scored: S15 = 0.925, below its band; the student gain does not survive ensembling (2026-10-15)
+
+**S15 (b, c, d x five folds, 15 own-weights students): LB 0.925.** Registered band was 0.928-0.940, so this is the "below 0.928: no gain over G" row. G (d3 + d3@336, ten models) stays the best scored own-weights entry at 0.928.
+Single students scored 0.922-0.923 (fold 0) against d3 fold 0 at 0.916, a +0.007 single-model gain; the 15-model ensemble gained only +0.002 over its own single fold, whereas G's ensemble gained +0.012 over d3 fold 0.
+Reading: pseudo-label students and ensembling remove the same thing (label noise), so the student recipe's advantage is mostly absorbed once models are averaged. It is not a data-pipeline failure: the 15 models
+ran with 0 fallbacks and every checkpoint loaded.
+Gold (n=58, rank-mean of five-fold means): G 0.9139, S15 0.9127, G + S15 0.9140, 5 configs (d3, d3@336, b, c, d) 0.9138; S15 - G -0.0012 [-0.0111, +0.0083]. Gold cannot separate any of them (interval is +-0.01).
+Reads used: 6 of 8 (anchor 0.916, b-s0 0.922, b-s1 0.923, c-s0 0.923, c2-s0 0.920, S15 0.925).
+Consequence for the finals: the realistic own-weights level is 0.925-0.930 on the public LB; the 0.964 leaders are not reachable with this recipe family. Remaining reads are for the sanity check
+of the final composition (runtime, 0 fallbacks), not for new bets.
