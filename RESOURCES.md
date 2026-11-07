@@ -6,10 +6,13 @@ list. All dataset metadata was read from Kaggle on 2026-10-16.
 
 The two final picks:
 
-| pick | kernel | public LB | submission |
-|---|---|---|---|
-| 1 | `mohammadyaserhussain/knee-phase9-submit-blend-i` (public stack P plus our d3 at weight 0.2) | 0.939 | 56819611 |
-| 2 | `mohammadyaserhussain/knee-phase11-submit-gs25` (25 models trained by us) | 0.928 | 57233603 |
+| pick | kernel | public LB | private LB | submission |
+|---|---|---|---|---|
+| 1 | `mohammadyaserhussain/knee-phase9-submit-blend-i` (public stack P plus our d3 at weight 0.2) | 0.939 | 0.925 | 56819611 |
+| 2 | `mohammadyaserhussain/knee-phase11-submit-gs25` (25 models trained by us) | 0.928 | 0.917 | 57233603 |
+
+Private scores were added after the competition closed. The final leaderboard shows rank 2,717 at 0.928, which is the private
+score of submission 56838003 (full public stack plus d3), not of either pick above; see the last entry in `NOTES.md`.
 
 ## Pick 1: P + d3 (blend-i)
 
@@ -46,7 +49,7 @@ upstream licences (Meta DINOv3 licence, CC-BY-NC-SA-4.0) conflict with a winner 
 ### B. Our own contribution (d3, weight 0.2)
 
 Five efficientnet_b0 group-attention models (`knee-phase8-confirm-d3`, folds `primary_v3`), trained by us with our own code
-(`source/src/knee`) from timm `efficientnet_b0.ra_in1k` (Apache-2.0) ImageNet weights. Training labels: report-derived label
+(`src/knee`) from timm `efficientnet_b0.ra_in1k` (Apache-2.0) ImageNet weights. Training labels: report-derived label
 blend of `stevenleehans/rsna-knee-llm-report-labels`, `pilkwang/rsna-knee-llm-labels`,
 `lixin73/rsna-knee-llm-report-labels-sol56` (all CC0-1.0) and our own Qwen3-4B (Apache-2.0) report labels. Inputs: our
 preprocessed slice cache built from the competition data, and `mohammadyaserhussain/rsna-knee-src` (our code, private).

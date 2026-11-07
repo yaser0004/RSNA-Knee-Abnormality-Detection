@@ -3349,7 +3349,7 @@ promotes only on a paired pooled-OOF CI.
 **Three decisions taken 2026-09-19:** main leaderboard only (the Efficiency Track entry is dropped;
 runtime stays logged for the record); the 58 gold studies may enter training for the final aggressive
 pick only, after every screening decision is closed; free compute only, with Colab free as a third lane
-for fold-0 screens. **Phase 8 plan:** `ai/plans/2026-09-19-phase8-win-plan.md` (supersedes Phase 7's).
+for fold-0 screens. **Phase 8 plan:** summarised in `DETAILS.md` (the plan file itself was a working document and is not kept).
 
 ### Phase 8 opens: the s2 read and Submission C are built, the quota is not there yet (2026-09-19)
 
@@ -3374,7 +3374,7 @@ and Submission C follows it; sequencing only, nothing in the plan changes.
   inside the 6 h budget the plan sets.
 
 **The offline scorer reproduces Submission B exactly** from the saved 9-group arrays: pooled OOF
-0.8713, gold 0.9059 (`ai/scratch/phase8-submit/score_members.py`). It takes s2's arrays the moment
+0.8713, gold 0.9059 (`tools/phase8-submit/score_members.py`). It takes s2's arrays the moment
 the read lands.
 
 **Step 2 landed, test-first, 280 tests (254 before):**
@@ -3447,7 +3447,7 @@ checkpoints re-read their own folds and the 58 gold studies at 336px, at 5 and a
   +0.0086, f1 +0.0053, c3 +0.0052). By the rule every member has been held to, **s2 reads nine groups.**
 
 **Submission C offline** (c2+c3+f1+s2, all at nine groups, probability mean over twenty models), rows and
-labels checked identical across the four sources (`ai/scratch/phase8-submit/score_members.py s2`):
+labels checked identical across the four sources (`tools/phase8-submit/score_members.py s2`):
 
 | ensemble | pooled OOF | gold |
 |---|---|---|
@@ -3732,7 +3732,7 @@ reproduce), and nine groups moved predictions by up to 0.57.
 excludes zero.** At nine groups it is the best single member by a wide margin: 0.8654 against s2's
 0.8622, c2's 0.8571, c3's 0.8543 and f1's 0.8495.
 
-**Five members at nine groups, scored offline** (`ai/scratch/phase8-submit/score_members.py +t2`):
+**Five members at nine groups, scored offline** (`tools/phase8-submit/score_members.py +t2`):
 
 | set | pooled OOF | gold |
 |---|---|---|
@@ -3858,8 +3858,7 @@ the push.**
 
 **Decision (user, 2026-10-01):** use public weights, filtered for licence compliance, and blend our
 ensemble into them. This supersedes the "none of it is usable" line of 2026-09-13, which was written
-under a top-10/Efficiency mandate. Plan: `ai/plans/2026-10-01-phase9-plan.md`; queue state:
-`ai/plans/phase9-queue.md`.
+under a top-10/Efficiency mandate. Plan: summarised in `DETAILS.md`.
 
 **Licence audit of the 0.943 public pipeline** (`jiweiliu/rsna-knee-fast-2xt4-inference`, same code as
 `yamadan96/rsna-knee-d4-public0946`; dataset licences from `kaggle datasets metadata`):
@@ -3886,7 +3885,7 @@ fitted weight would be tuned on 390 public studies (+/-0.003 noise).
 
 `notebooks/phase9-public-stack/` is the 0.943 public pipeline (`jiweiliu/rsna-knee-fast-2xt4-inference`)
 with Stage 2 (A5, DINOv3-derived) and Stage 3 (RadImageNet heads) cut out, built by
-`ai/scratch/phase9-public/build_p.py` as asserted text swaps (a changed parent fails the build). What
+`tools/phase9-public/build_p.py` as asserted text swaps (a changed parent fails the build). What
 is left: DINOv2-small x20, Raptor CoAtNet x4 views, four CoAtNet readers, the parent's own 60/40
 CoAt/Raptor-vs-base outer blend. Static check: pyflakes finds no undefined name the parent did not
 already have, and the stage-file hand-off (DINO writes `_pipeline_stage.csv`, the Raptor/CoAt stage
@@ -3894,7 +3893,7 @@ reads it) is intact. It cannot be run locally (CoAtNet-384 x several, 7 GB RAM),
 the Kaggle GPU kernel itself.
 
 `notebooks/phase9-submit-blend/` runs P, then our Submission D code unchanged as a subprocess, then a
-per-label rank mean at equal weight (`ai/scratch/phase9-public/build_blend.py`; blend cell tested on
+per-label rank mean at equal weight (`tools/phase9-public/build_blend.py`; blend cell tested on
 synthetic files, including the "ours failed, submit P alone" path and a study-set-mismatch raise).
 
 **Pre-registered band for P alone.** The full stack scores 0.943; P removes the DINOv3 member and the
@@ -4012,7 +4011,7 @@ accumulated as s2 was; target the three-source blend, scored against steven_v4 b
 | **d3@336, 9 groups** | **0.8823** | **0.9120** |
 
 The best single model on both tiers (d3 at 224: 0.8781 / 0.9106; a2 0.8704 / 0.9067). Scored offline
-(`ai/scratch/phase9-offline/score8.py`, all nine-group arrays, rows verified identical):
+(`tools/phase9-offline/score8.py`, all nine-group arrays, rows verified identical):
 
 - **d3@336 added to the seven: +0.0022 [+0.0020, +0.0025]** pooled OOF (0.8820 -> 0.8842), CI excluding
   zero, over the +0.0015 bar; gold +0.0022 [-0.0012, +0.0060], spanning zero. **Promoted as the eighth
@@ -4073,7 +4072,7 @@ fixed model budget, not by membership of the full ensemble.
 
 ### Fewer members is better: d3 + d3@336 beats all eight; G and blend-g, with bands registered before they are submitted (2026-10-02)
 
-Pooled OOF at nine groups (`ai/scratch/phase9-offline/subsets.py`, exhaustive over subsets of the eight
+Pooled OOF at nine groups (`tools/phase9-offline/subsets.py`, exhaustive over subsets of the eight
 confirmed members, rows verified identical):
 
 | set | models | pooled OOF | gold |
@@ -4163,7 +4162,7 @@ our half, one information about P's runtime); 0.941-0.945 expected if it fit.
 
 ### Survey of 15 newer public label sets: five are contaminated, none beats the target we have (2026-10-03)
 
-Scored on the 58 gold studies with a contamination check (`ai/scratch/phase9-labels/score_gold.py`: macro AUC,
+Scored on the 58 gold studies with a contamination check (`tools/phase9-labels/score_gold.py`: macro AUC,
 exact agreement of binarised labels with gold, and AUC against the current three-source blend on the studies
 both cover). Reference: steven_v4 gold 0.8927, ours 0.8616, lixin73 0.8488, the old five-way rank blend 0.8976.
 
@@ -4297,7 +4296,7 @@ weights). This supersedes the "licence-compliant only" filter of 2026-10-01. Con
 not lost: (1) those members cannot appear in a winner deliverable released under CC-BY-NC 4.0, so this route
 forfeits prize eligibility for any entry that includes them, which is irrelevant at the expected rank (~1,100) and
 matters only if the standing changed; (2) the audit table above still says exactly which parts to remove if
-that ever mattered; (3) the pipeline is another author's code, so it lives under `ai/scratch/phase9-full/`
+that ever mattered; (3) the pipeline is another author's code, so it was kept only in the local workspace, not here
 (attribution header intact in its first cell) and is not added to this repository.
 
 **Step 1: the notebook as published** (`yamadan96/rsna-knee-d4-public0946`, whose own header says it scores 0.943),
@@ -4344,7 +4343,7 @@ not at this rank. The selection itself is the user's, on the My Submissions page
 
 ### Phase 10 opens: a frozen-feature factory, and its rules registered before the first push (2026-10-06)
 
-**Plan** (`ai/plans/2026-10-06-phase10-plan.md`, approved by the user 2026-10-06). The 0.943 entries are the floor and are
+**Plan** (summarised in `DETAILS.md`, approved by the user 2026-10-06). The 0.943 entries are the floor and are
 untouched. The new bet: our studies are already prepped (6 slots x 9 windows at 336px, ~44 present images per study), so
 a large **frozen** backbone costs one forward pass per image, once; the features are cached (~0.5 GB per backbone) and
 heads, targets, seeds and denoising become minutes of CPU instead of 5-8 GPU-hours per decision. Decisions recorded:
@@ -4432,7 +4431,7 @@ loop's success test checked only that the output file *existed*, which a zero-by
 **Consequence: Gate G1 moves to a Kaggle kernel (`knee-phase10-g1`) next to the cache.** Nothing in the rule changes: the
 two head arms, the standardisation, the window handling, the target (steven_v4 + ours + lixin73 from the confirm
 kernel's own cell), the hash-pinned `primary_v3` folds, the gold handling and the reading rule are exactly those registered
-on 2026-10-06; the training core is the same code as the local harness `ai/scratch/phase10-g1/g1.py`, and only the
+on 2026-10-06; the training core is the same code as the local harness `tools/phase10-g1/g1.py`, and only the
 loading cell differs. Only the small prediction arrays (~1 MB) come back, and the member-gain arithmetic against the
 eight confirmed members runs locally as registered (`member_gain.py`, whose assertions check row order, truth and gold
 order against the members before any number is read).
@@ -4493,7 +4492,7 @@ and the measured levers can reach in 16 days.
 **Why the bet is the target, not the network (thread 735304, "Best single-model score"):** teams report single models at
 0.950-0.955 at 224px. The recurring recipe: teachers trained on several label sources, their OOF as soft pseudo-labels (a 50/50
 soft bootstrap with the labels), and students retrained on them. The public single-model recipe (Raptor CoAtNet-2 at 384)
-scores 0.924, the same tier as our d3. We have never run the loop. Plan: `ai/plans/2026-10-07-phase11-plan.md`.
+scores 0.924, the same tier as our d3. We have never run the loop. Plan: summarised in `DETAILS.md`.
 
 **Per-label weakness map (eight members, probability mean; d3 beside it):**
 
@@ -4511,9 +4510,9 @@ Synovitis is the weakest on gold for the models and for every label source (0.79
 which shares the same misreading. So the target, not the image model, is the limit there.
 
 **Teacher array:** the eight-member OOF mean on the 4,349 report studies,
-`ai/scratch/phase11-step0/teacher8_oof.csv` (sha256 prefix 7d1b1a4b4595; asserted: no gold row, finite, folds `primary_v3` order).
+`teacher8_oof.csv` (a working file, not kept in this repo; uploaded as part of the private Kaggle dataset `rsna-knee-phase11-teacher`; sha256 prefix 7d1b1a4b4595; asserted: no gold row, finite, folds `primary_v3` order).
 
-**Claude relabel: prompt frozen before any gold output exists.** `ai/scratch/phase11-claude-labels/prompt.md`, sha256
+**Claude relabel: prompt frozen before any gold output exists.** `tools/phase11-claude-labels/prompt.md`, sha256
 `44f2ceead8783fc73f6d5f4960b07393c8e1e02a37ad948518b016a043a0804d`. It holds the host rubric verbatim, framed as "the probability
 that the MSK expert panel re-reading the images marked it positive"; it is zero-shot with no gold reports as examples, and it
 asks for 12 labels on a 9-step probability scale plus 18 auxiliary atoms and an evidence quote. Chunks carry uid and report only
@@ -4521,7 +4520,7 @@ asks for 12 labels on a 9-step probability scale plus 18 auxiliary atoms and an 
 revised:** iterating it after reading gold would be tuning on gold.
 
 **Gate C1 (registered now):** two independent passes over the 58 gold reports (pass 1 Sonnet, pass 2 Opus, each in a fresh
-subagent that sees only the prompt and the chunk). Scorer: `ai/scratch/phase11-claude-labels/score_c1.py`. Primary statistic:
+subagent that sees only the prompt and the chunk). Scorer: `tools/phase11-claude-labels/score_c1.py`. Primary statistic:
 cell agreement with gold, each source thresholded at 0.5, over 58 x 12 cells, with a paired CI by resampling studies (10,000).
 **Pass if the mean of the two passes beats the three-source blend (steven_v4 + ours + lixin73) with the CI above zero, or if the
 blend plus Claude as a fourth source beats the blend with the CI above zero.** Per-label and macro AUC are reported and do not
@@ -4674,7 +4673,7 @@ reset, in that order. The TPU pool (20 h, never used) is available now; whether 
 
 ### The Claude-label corpus is assembled and uploaded (2026-10-07)
 
-`ai/scratch/phase11-claude-labels/assemble.py`: 4,349 corpus studies, 12 labels + 18 atoms, no missing or unparsed cell, no gold study; **two labellers recorded in
+`tools/phase11-claude-labels/assemble.py`: 4,349 corpus studies, 12 labels + 18 atoms, no missing or unparsed cell, no gold study; **two labellers recorded in
 `labeller_manifest.csv`: claude-sonnet-5-5 for 2,280 studies (chunks 0000-0018, pass 1 only) and `opencode/muse-spark-1.3-contributor-free` for 2,069 (0019-0036)**.
 Uploaded as the private dataset `mohammadyaserhussain/rsna-knee-phase11-claude-labels` (`claude_labels.csv`). Corpus prevalence: ACL 0.125, MCL 0.043, Medial Meniscus 0.371,
 Lateral Meniscus 0.145, Medial OA 0.159, Lateral OA 0.088, PF OA 0.184, Effusion 0.207, Synovitis 0.156, Baker's 0.115, Contusion 0.146, Fracture 0.052.
@@ -4781,7 +4780,7 @@ on elapsed time; wait for COMPLETE/ERROR.** The launcher run_timeout and process
 Pooled five-fold results (TPU, seed 0, g9; OOF against steven_v4 is circular for changed targets): d3 0.8781 | **b 0.8893, c 0.8894, d 0.8900** | gold of the 5-fold mean: **b 0.9114, c 0.9128, d 0.9112**
 (c - b +0.0014 [-0.0019,+0.0048]; d - b -0.0002 [-0.0081,+0.0078]) | **mean of b+c+d: OOF 0.8922, gold 0.9139.** The three targets are not distinguishable on gold; as members they are
 near-interchangeable, so c (chosen on the LB tie rule) stays the primary and b/d are diversity members.
-Saved: `source/checkpoints/oof_{b,c,d}_s0_g9.npy`, `gold_{b,c,d}_s0_g9.npy` (row order = d3 OOF uids).
+Saved: `checkpoints/oof_{b,c,d}_s0_g9.npy`, `gold_{b,c,d}_s0_g9.npy` (row order = d3 OOF uids).
 
 ### Teacher round 2 (N3): farm3 registered before the push (2026-10-13)
 
@@ -4804,7 +4803,7 @@ and is QUEUED. Lesson: a new target name needs a local dry run of the target cel
 ### TPU farm3 v2 read: round-2 students (2026-10-15)
 
 Farm3 v2 left the queue after about 20 h, ran to COMPLETE (RUNNING for about 9 h in Kaggle's status; training itself 0.40 h, all 8 jobs, no error or timeout files), and the earlier fix held.
-Readout script `ai/scratch/phase11-tpu/read_farm3.py`; arrays saved as `source/checkpoints/{oof,gold}_c2_s0_g9.npy`.
+Readout script `tools/phase11-tpu/read_farm3.py`; arrays saved as `checkpoints/{oof,gold}_c2_s0_g9.npy`.
 
 | | c (round 1) | c2 (round 2) |
 |---|---|---|
@@ -4892,3 +4891,28 @@ Nothing was changed on my side: the user's decision stands until the user revise
 User decision (2026-10-16): "Go with your recommendation, write the resource list." Finals: **pick 1 = P + d3 (blend-i, 0.939, submission 56819611)**, **pick 2 = GS25 (0.928, submission 57233603, own weights only)**. The full 0.943 stack is not used (DINOv3-derived and RadImageNet members conflict with the unresolved winner licence, thread 739905).
 The list the hosts asked for (shared weights and source datasets, with authors and upstream licences read from Kaggle on 2026-10-16) is `RESOURCES.md`. It is the text to paste into the description of each final.
 Still open: the blend-i hidden run depends on P's 6.3-7.3 h and the 8.0 h watchdog; it completed once, no new run is needed unless the composition changes. The user clicks the two finals on Kaggle. LB reads left: 1.
+
+### Competition closed: private scores and final standing (2026-11-07)
+
+The competition ended 2026-10-22. Private scores, read from `kaggle competitions submissions` on 2026-11-07:
+
+| entry | submission | public | private |
+|---|---|---|---|
+| full public stack + d3 at 0.15 | 56838003 | 0.943 | **0.928** |
+| full public stack, unmodified | 56829311 | 0.943 | 0.927 |
+| P + d3 at 0.2 (blend-i, planned pick 1) | 56819611 | 0.939 | 0.925 |
+| P alone | 56754867 | 0.938 | 0.924 |
+| G (d3 + d3@336) | 56771279 | 0.928 | 0.917 |
+| GS25 (planned pick 2, own weights) | 57233603 | 0.928 | 0.917 |
+| S15 (students) | 57221367 | 0.925 | 0.914 |
+
+**Final private leaderboard: rank 2,717, score 0.928** (up 183 places from public rank 2,900 of 6,299; screenshot taken by the
+user). The 0.928 equals submission 56838003's private score, not either planned pick (0.925, 0.917). The Kaggle API does not
+expose which submissions were selected, so whether the finals were clicked as planned, or Kaggle fell back to its default
+selection (the two best public scores, which are exactly the two 0.943 entries), is not recorded here.
+
+Readings:
+- Private scored each of these entries 0.011-0.016 below public, and the order held almost exactly. No entry gained on the reshuffle.
+- Our own models' private scores (0.917 for G and GS25) sit 0.011 below the public stack P (0.924) and 0.011 below the best entry.
+- The pick-1 argument (larger, more diverse ensemble for the 910-study private set) did not produce a measurable advantage:
+  GS25 and G tied on private as they did on public.
